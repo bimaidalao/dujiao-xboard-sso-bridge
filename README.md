@@ -173,6 +173,8 @@ docs/                   功能、架构、部署、安全和故障排查文档
 
 ## 文档导航
 
+- [AI 商店订单关联工单与手机端遮挡修复](docs/ORDER_TICKET_LINK.md)
+
 - [二开功能详细说明](docs/FEATURES.md)
 - [生产服务器基线与资源哈希](docs/PRODUCTION_BASELINE.md)
 - [傻瓜式完整部署教程](docs/DEPLOYMENT.md)
