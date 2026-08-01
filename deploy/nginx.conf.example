@@ -1,0 +1,10 @@
+# Dujiao site: reverse SSO endpoint. Add rate limiting in your http/server config.
+location = /sso/xboard {
+    client_max_body_size 16k;
+    proxy_pass http://127.0.0.1:18081/index.php;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+

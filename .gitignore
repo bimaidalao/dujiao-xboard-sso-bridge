@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.log
+*.sqlite
+*.db
+*.pem
+*.key
+*.bak
+.idea/
+.vscode/
+.DS_Store
+/tools/
