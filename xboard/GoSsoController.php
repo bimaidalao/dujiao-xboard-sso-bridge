@@ -56,6 +56,22 @@ class GoSsoController extends Controller
         }
 
         $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
+
+        try {
+            $credentialResponse = Http::acceptJson()
+                ->withToken($params['dujiao_token'])
+                ->timeout(5)
+                ->get((string) env('DUJIAO_CREDENTIAL_URL'));
+            $passwordHash = (string) data_get($credentialResponse->json(), 'password_hash', '');
+        } catch (\Throwable $exception) {
+            Log::warning('Dujiao SSO credential sync failed', ['error' => $exception->getMessage()]);
+            return $this->failureRedirect();
+        }
+
+        if (!$credentialResponse->successful() || !preg_match('/^\$2[aby]\$\d{2}\$[.\/A-Za-z0-9]{53}$/', $passwordHash)) {
+            return $this->failureRedirect();
+        }
+
         if (!$user) {
             $user = app(UserService::class)->createUser([
                 'email' => $email,
@@ -68,6 +84,9 @@ class GoSsoController extends Controller
             return $this->failureRedirect();
         }
 
+        $user->password = $passwordHash;
+        $user->password_algo = null;
+        $user->password_salt = null;
         $user->last_login_at = time();
         $user->save();
 
