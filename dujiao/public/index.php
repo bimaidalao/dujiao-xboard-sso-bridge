@@ -91,7 +91,44 @@ function fetchXboardUser(string $authData): array
     return ['email' => $email];
 }
 
-function findOrCreateDujiaoUser(string $email): array
+function readXboardPasswordHash(string $email): string
+{
+    $settings = [];
+    $lines = file(envValue('XBOARD_ENV_PATH'), FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+    foreach ($lines ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || $line[0] === '#' || strpos($line, '=') === false) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $settings[trim($key)] = trim(trim($value), "\"'");
+    }
+
+    foreach (['DB_DATABASE', 'DB_USERNAME', 'DB_PASSWORD'] as $required) {
+        if (!array_key_exists($required, $settings)) {
+            throw new RuntimeException('Incomplete Xboard database configuration');
+        }
+    }
+
+    $database = new PDO(
+        'mysql:host=' . ($settings['DB_HOST'] ?? '127.0.0.1')
+        . ';port=' . ($settings['DB_PORT'] ?? '3306')
+        . ';dbname=' . $settings['DB_DATABASE'] . ';charset=utf8mb4',
+        $settings['DB_USERNAME'],
+        $settings['DB_PASSWORD'],
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC]
+    );
+    $query = $database->prepare('SELECT password FROM v2_user WHERE LOWER(email) = LOWER(:email) LIMIT 1');
+    $query->execute([':email' => $email]);
+    $row = $query->fetch();
+    $hash = (string) ($row['password'] ?? '');
+    if (!preg_match('/^\$2[aby]\$\d{2}\$[.\/A-Za-z0-9]{53}$/', $hash)) {
+        throw new RuntimeException('Unsupported Xboard password hash');
+    }
+    return strncmp($hash, '$2y$', 4) === 0 ? '$2a$' . substr($hash, 4) : $hash;
+}
+
+function findOrCreateDujiaoUser(string $email, string $passwordHash): array
 {
     $database = new PDO('sqlite:' . envValue('DUJIAO_DATABASE_PATH'), null, null, [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -100,7 +137,7 @@ function findOrCreateDujiaoUser(string $email): array
     $database->exec('PRAGMA busy_timeout = 5000');
     $database->beginTransaction();
     try {
-        $select = $database->prepare('SELECT id, email, token_version, status FROM users WHERE lower(email) = lower(:email) AND deleted_at IS NULL LIMIT 1');
+        $select = $database->prepare('SELECT id, email, password_hash, token_version, status FROM users WHERE lower(email) = lower(:email) AND deleted_at IS NULL LIMIT 1');
         $select->execute([':email' => $email]);
         $user = $select->fetch();
         $now = gmdate('Y-m-d H:i:s');
@@ -108,11 +145,11 @@ function findOrCreateDujiaoUser(string $email): array
         if (!$user) {
             $insert = $database->prepare(
                 'INSERT INTO users (email, password_hash, password_setup_required, display_name, locale, status, member_level_id, total_recharged, total_spent, token_version, email_verified_at, last_login_at, created_at, updated_at) '
-                . 'VALUES (:email, :password_hash, 1, :display_name, :locale, :status, 0, 0, 0, 0, :verified_at, :last_login_at, :created_at, :updated_at)'
+                . 'VALUES (:email, :password_hash, 0, :display_name, :locale, :status, 0, 0, 0, 0, :verified_at, :last_login_at, :created_at, :updated_at)'
             );
             $insert->execute([
                 ':email' => $email,
-                ':password_hash' => password_hash(bin2hex(random_bytes(32)), PASSWORD_BCRYPT),
+                ':password_hash' => $passwordHash,
                 ':display_name' => strstr($email, '@', true) ?: 'User',
                 ':locale' => 'zh-CN',
                 ':status' => 'active',
@@ -121,7 +158,23 @@ function findOrCreateDujiaoUser(string $email): array
                 ':created_at' => $now,
                 ':updated_at' => $now,
             ]);
-            $user = ['id' => (int) $database->lastInsertId(), 'email' => $email, 'token_version' => 0, 'status' => 'active'];
+            $user = ['id' => (int) $database->lastInsertId(), 'email' => $email, 'password_hash' => $passwordHash, 'token_version' => 0, 'status' => 'active'];
+        } else {
+            $changed = !hash_equals((string) $user['password_hash'], $passwordHash);
+            $update = $database->prepare(
+                'UPDATE users SET password_hash = :password_hash, password_setup_required = 0, '
+                . 'token_version = token_version + :increment, last_login_at = :last_login_at, updated_at = :updated_at WHERE id = :id'
+            );
+            $update->execute([
+                ':password_hash' => $passwordHash,
+                ':increment' => $changed ? 1 : 0,
+                ':last_login_at' => $now,
+                ':updated_at' => $now,
+                ':id' => $user['id'],
+            ]);
+            if ($changed) {
+                $user['token_version'] = (int) $user['token_version'] + 1;
+            }
         }
 
         if (($user['status'] ?? '') !== 'active') {
@@ -148,7 +201,8 @@ if ($authData === '' || strlen($authData) > 8192) {
 
 try {
     $xboardUser = fetchXboardUser($authData);
-    $dujiaoUser = findOrCreateDujiaoUser($xboardUser['email']);
+    $passwordHash = readXboardPasswordHash($xboardUser['email']);
+    $dujiaoUser = findOrCreateDujiaoUser($xboardUser['email'], $passwordHash);
     $token = issueUserToken($dujiaoUser);
 } catch (Throwable $exception) {
     error_log('Xboard to Dujiao SSO failed: ' . $exception->getMessage());
@@ -163,4 +217,3 @@ $encodedToken = json_encode($token, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS 
 echo '<!doctype html><meta charset="utf-8"><title>Signing in</title>';
 echo '<style>body{display:grid;place-items:center;min-height:100vh;font:14px system-ui;color:#334155;background:#f6f8fc}</style>';
 echo '<body>Signing in securely…<script>localStorage.setItem("user_token",' . $encodedToken . ');location.replace("/");</script></body>';
-

@@ -14,8 +14,8 @@ RestartSec=2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+ReadOnlyPaths=/opt/xboard
 ReadWritePaths=/opt/dujiao-next/db
 
 [Install]
 WantedBy=multi-user.target
-
