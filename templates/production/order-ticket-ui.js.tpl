@@ -3,6 +3,7 @@
 
   var ORDER_API = '__STORE_ORDER_API__';
   var selectedOrderId = '';
+  var selectedServiceType = '';
   var cachedOrders = null;
   var loadingOrders = null;
 
@@ -70,12 +71,13 @@
     document.body.classList.toggle('ai-store-ticket-editor-focused', editorFocused);
     updateMobileLayers(dialog || editorFocused);
     if (!ticketPage) return;
-    if (!dialog || dialog.querySelector('#ai-store-ticket-order')) return;
+    if (!dialog) return;
     dialog.classList.add('ai-store-ticket-dialog');
+    return;
 
     var wrapper = document.createElement('div');
     wrapper.id = 'ai-store-ticket-order';
-    wrapper.innerHTML = '<label for="ai-store-ticket-order-select">本次问题与哪个 AI 工具订单有关？ <small>（可选）</small></label><select id="ai-store-ticket-order-select" disabled><option value="">正在读取当前账号订单…</option></select><p>如需处理 GPT、Gemini 等商品问题，请选择对应订单；节点套餐信息会自动附带。</p>';
+    wrapper.innerHTML = '<label for="ai-store-ticket-order-select">请选择需要售后的服务或订单</label><select id="ai-store-ticket-order-select" disabled><option value="">正在读取当前账号订单…</option></select><p>选择节点套餐时会自动附带当前套餐信息；选择商城商品时会附带对应订单。</p>';
     var labels = dialog.querySelectorAll('label');
     var messageContainer = null;
     for (var i = 0; i < labels.length; i += 1) {
@@ -93,31 +95,38 @@
     else dialog.appendChild(wrapper);
 
     var select = wrapper.querySelector('select');
-    select.addEventListener('change', function () { selectedOrderId = select.value || ''; });
+    select.addEventListener('change', function () {
+      var value = select.value || '';
+      selectedServiceType = value.indexOf('store:') === 0 ? 'store' : value;
+      selectedOrderId = selectedServiceType === 'store' ? value.slice(6) : '';
+    });
     loadOrders().then(function (orders) {
       if (!document.body.contains(select)) return;
-      select.innerHTML = '<option value="">与 AI 工具订单无关</option>';
+      select.innerHTML = '<option value="">请选择服务或订单</option><option value="node">跨境速云节点/套餐（当前账号）</option>';
       orders.forEach(function (order) {
         var option = document.createElement('option');
-        option.value = String(order.id);
-        option.textContent = order.order_no + ' · ' + (order.products || []).join('、') + ' · ' + order.amount + ' ' + order.currency + ' · ' + statusLabel(order.status);
+        option.value = 'store:' + String(order.id);
+        option.textContent = '[AI工具商店] ' + order.order_no + ' · ' + (order.products || []).join('、') + ' · ' + order.amount + ' ' + order.currency + ' · ' + statusLabel(order.status);
         select.appendChild(option);
       });
+      var other = document.createElement('option');
+      other.value = 'other';
+      other.textContent = '其他问题 / 找不到订单';
+      select.appendChild(other);
       select.disabled = false;
-      if (!orders.length) select.options[0].textContent = '当前账号暂无可关联订单';
     });
   }
 
   function addOrderToBody(body) {
-    if (!selectedOrderId) return body;
+    if (!selectedServiceType) return body;
     if (typeof body === 'string') {
       try {
-        var json = JSON.parse(body); json.go_order_id = Number(selectedOrderId); return JSON.stringify(json);
+        var json = JSON.parse(body); json.service_type = selectedServiceType; if (selectedOrderId) json.go_order_id = Number(selectedOrderId); return JSON.stringify(json);
       } catch (_) {
-        var params = new URLSearchParams(body); params.set('go_order_id', selectedOrderId); return params.toString();
+        var params = new URLSearchParams(body); params.set('service_type', selectedServiceType); if (selectedOrderId) params.set('go_order_id', selectedOrderId); return params.toString();
       }
     }
-    if (body instanceof FormData || body instanceof URLSearchParams) body.set('go_order_id', selectedOrderId);
+    if (body instanceof FormData || body instanceof URLSearchParams) { body.set('service_type', selectedServiceType); if (selectedOrderId) body.set('go_order_id', selectedOrderId); }
     return body;
   }
 
@@ -136,7 +145,7 @@
   };
 
   new MutationObserver(mountOrderSelect).observe(document.documentElement, {childList:true,subtree:true});
-  addEventListener('hashchange', function () { selectedOrderId = ''; mountOrderSelect(); });
+  addEventListener('hashchange', function () { selectedOrderId = ''; selectedServiceType = ''; mountOrderSelect(); });
   document.addEventListener('focusin', mountOrderSelect);
   document.addEventListener('focusout', function () { setTimeout(mountOrderSelect, 0); });
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountOrderSelect, {once:true});
