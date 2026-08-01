@@ -10,4 +10,7 @@
 .idea/
 .vscode/
 .DS_Store
-/tools/
+install.env
+.screenshot-chrome-profile/
+/tools/*
+!/tools/capture-live-screenshots.mjs

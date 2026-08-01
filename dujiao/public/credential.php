@@ -42,6 +42,7 @@ $profile = is_array($identity['data'] ?? null) ? $identity['data'] : [];
 $email = strtolower(trim((string) ($profile['email'] ?? '')));
 if (
     $status !== 200
+    || (int) ($identity['status_code'] ?? -1) !== 0
     || !filter_var($email, FILTER_VALIDATE_EMAIL)
     || empty($profile['email_verified_at'])
     || (string) ($profile['status'] ?? 'active') !== 'active'
