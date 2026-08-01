@@ -19,25 +19,29 @@
 - 桌面端、手机端都有响应式入口，并兼容日间/夜间主题。
 - 手机端客服入口收进底部导航，避免悬浮卡片挡住菜单和页面滑动。
 
-## 实际效果截图
+## 服务器当前实际效果
+
+以下截图在 **2026-08-02** 直接使用线上正在运行的页面、DOM、CSS 和 JS 生成；没有使用 README 旧版示意卡片，也没有包含用户账号或 Token。仓库 `templates/production/` 中的模板与线上组件同源，只把域名、Telegram 和资源路径改成了安装变量。
 
 ### 1. AI 商城 → 节点网站
 
-商城页面显示“进入跨境速云”入口，登录用户点击后自动进入节点仪表盘。
+商城右下角为当前线上完整悬浮组件：节点入口、工单客服和 Telegram 客服。手机端只保留紧凑节点入口，客服折叠进底部导航。
 
-![Dujiao 商城中的节点面板入口](docs/images/dujiao-panel-entry.png)
+![服务器当前 Dujiao 商城桌面效果](docs/images/server-dujiao-desktop.png)
+
+![服务器当前 Dujiao 商城手机效果](docs/images/server-dujiao-mobile.png)
 
 ### 2. 节点网站 → AI 工具/账号商店
 
-节点面板商店区域显示完整商店卡片，点击后自动进入商城。
+节点网站使用当前线上右下角商店悬浮卡片，登录用户点击后通过 SSO 自动进入商城。
 
-![Xboard 中的 AI 工具商店入口](docs/images/xboard-store-entry.png)
+![服务器当前 Xboard 桌面商店卡片](docs/images/server-xboard-desktop.png)
 
 ### 3. 手机端紧凑入口
 
-移动端卡片缩小并避开底部菜单、“回到顶部”和滑动区域。
+移动端卡片缩小为 `186 × 50px` 左右，隐藏独立客服悬浮按钮，并避开底部菜单、“回到顶部”和滑动区域。
 
-![手机端紧凑商店卡片](docs/images/mobile-store-card.png)
+![服务器当前 Xboard 手机商店卡片](docs/images/server-xboard-mobile.png)
 
 ## 二开功能一览
 
@@ -94,7 +98,7 @@ sequenceDiagram
 
 凭据接口仅监听 `127.0.0.1`，不会公开到互联网。架构和数据流详见 [架构说明](docs/ARCHITECTURE.md)。
 
-## 傻瓜式部署入口
+## 一条命令部署
 
 适合的参考环境：两个网站位于同一台 Linux VPS，Nginx 对外提供 HTTPS，Dujiao Next 使用 SQLite，Xboard 使用 MySQL/MariaDB。
 
@@ -107,15 +111,13 @@ sequenceDiagram
 - Xboard 根目录、`.env` 路径；
 - 一个专门用于测试的邮箱账号。
 
-先克隆项目：
+在 Ubuntu/Debian 服务器中执行下面一条命令：
 
 ```bash
-cd /opt
-sudo git clone https://github.com/bimaidalao/dujiao-xboard-sso-bridge.git
-cd dujiao-xboard-sso-bridge
+curl -fsSL https://raw.githubusercontent.com/bimaidalao/dujiao-xboard-sso-bridge/main/bootstrap.sh | sudo bash
 ```
 
-然后严格按照 [傻瓜式完整部署教程](docs/DEPLOYMENT.md) 操作。教程包含：
+它会自动下载项目并启动交互式安装器。用户只需按提示确认两个项目目录、两个域名、Nginx 配置和服务用户。安装器会：
 
 1. 自动查找程序路径；
 2. 填写部署参数表；
@@ -123,19 +125,36 @@ cd dujiao-xboard-sso-bridge
 4. 复制 Xboard 控制器并添加路由；
 5. 安装 Dujiao 桥接和 systemd 服务；
 6. 添加 Nginx 固定路由；
-7. 添加桌面端和手机端入口；
+7. 安装与当前生产服务器同源的桌面端、手机端入口和 Logo；
 8. 清理缓存并启动服务；
 9. 用临时账号验证双向登录和密码共享；
 10. 出错时按原路径快速回滚。
 
-> 不建议直接在生产站盲目复制。Xboard 不同分支的控制器目录、路由写法和用户字段可能不同，教程在每个需要核对的位置都给出了检查命令。
+只想检查自动识别结果、不修改服务器：
+
+```bash
+sudo bash /opt/dujiao-xboard-sso-bridge/install.sh --dry-run
+```
+
+安装器支持配置文件无人值守模式：
+
+```bash
+cp install.env.example install.env
+nano install.env
+sudo bash install.sh --config install.env --yes
+```
+
+> 一键不等于盲改。脚本会在 `/var/backups/dujiao-xboard-sso-bridge/` 创建时间戳备份；无法确认 Xboard 路由、Nginx server block 或文件权限时会停止，不会使用 `chmod 777`，也不会把凭据端口开放到公网。
 
 ## 仓库结构
 
 ```text
 dujiao/public/          Xboard → Dujiao 桥接入口、本机凭据接口
 xboard/                 Dujiao → Xboard Laravel 控制器、路由片段
-frontend/               双向入口组件、响应式样式和配置示例
+templates/production/   从当前生产服务器提取并参数化的真实前端组件
+bootstrap.sh            单网址下载与启动入口
+install.sh              交互式/无人值守一键安装器
+check-install.sh        安装后的健康检查
 deploy/                 Nginx、systemd 配置示例
 docs/images/            已脱敏的真实效果截图
 docs/                   功能、架构、部署、安全和故障排查文档
@@ -155,6 +174,7 @@ docs/                   功能、架构、部署、安全和故障排查文档
 ## 文档导航
 
 - [二开功能详细说明](docs/FEATURES.md)
+- [生产服务器基线与资源哈希](docs/PRODUCTION_BASELINE.md)
 - [傻瓜式完整部署教程](docs/DEPLOYMENT.md)
 - [架构与数据流](docs/ARCHITECTURE.md)
 - [安全说明](docs/SECURITY.md)

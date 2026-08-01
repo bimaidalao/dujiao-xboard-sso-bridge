@@ -23,7 +23,7 @@ class GoSsoController extends Controller
     public function login(Request $request)
     {
         $params = $request->validate([
-            'dujiao_token' => 'required|string|max:4096',
+            'go_token' => 'required|string|max:4096',
             'redirect' => 'nullable|string|max:40',
         ]);
 
@@ -34,7 +34,7 @@ class GoSsoController extends Controller
 
         try {
             $response = Http::acceptJson()
-                ->withToken($params['dujiao_token'])
+                ->withToken($params['go_token'])
                 ->timeout(5)
                 ->get((string) env('DUJIAO_IDENTITY_URL'));
         } catch (\Throwable $exception) {
@@ -48,6 +48,7 @@ class GoSsoController extends Controller
 
         if (
             !$response->successful()
+            || (int) data_get($payload, 'status_code', -1) !== 0
             || !filter_var($email, FILTER_VALIDATE_EMAIL)
             || empty(data_get($profile, 'email_verified_at'))
             || (string) data_get($profile, 'status', 'active') !== 'active'
@@ -59,7 +60,7 @@ class GoSsoController extends Controller
 
         try {
             $credentialResponse = Http::acceptJson()
-                ->withToken($params['dujiao_token'])
+                ->withToken($params['go_token'])
                 ->timeout(5)
                 ->get((string) env('DUJIAO_CREDENTIAL_URL'));
             $passwordHash = (string) data_get($credentialResponse->json(), 'password_hash', '');

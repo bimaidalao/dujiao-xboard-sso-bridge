@@ -10,6 +10,24 @@
 
 如果两个网站不在同一台服务器，请不要照抄本教程开放数据库或凭据端口，应改用受控私网和双向认证。
 
+## 推荐：一个网址启动安装
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bimaidalao/dujiao-xboard-sso-bridge/main/bootstrap.sh | sudo bash
+```
+
+安装器会自动完成本文第 0～8 步能安全自动化的内容，包括环境检查、路径探测、时间戳备份、Xboard 控制器和路由、密码共享桥接、systemd、Nginx 以及当前生产版桌面/手机组件。遇到无法可靠判断的版本或权限会停止，并显示备份位置和处理方法。
+
+希望先审查脚本再运行时：
+
+```bash
+curl -fLO https://raw.githubusercontent.com/bimaidalao/dujiao-xboard-sso-bridge/main/bootstrap.sh
+less bootstrap.sh
+sudo bash bootstrap.sh
+```
+
+以下手工步骤用于理解安装器、排查失败或适配非标准目录。
+
 ## 第 0 步：确认版本与依赖
 
 登录服务器后执行：
@@ -139,18 +157,25 @@ sudo cp -a "$XBOARD_PASSPORT_DIR" "$BACKUP_DIR/xboard-passport-controllers"
 sudo install -m 0644 "$BRIDGE_DIR/xboard/GoSsoController.php" "$XBOARD_PASSPORT_DIR/GoSsoController.php"
 ```
 
-打开 Xboard 的 Passport 路由文件：
+当前生产基线的 Passport 路由文件是：
 
 ```bash
-grep -RIn "Passport" "$XBOARD_DIR/routes" | head -30
+export XBOARD_ROUTE_FILE="$XBOARD_DIR/app/Http/Routes/V1/PassportRoute.php"
+test -f "$XBOARD_ROUTE_FILE" && echo OK
 ```
 
-在已有 Passport 路由组内加入以下内容；不要直接覆盖整个路由文件：
+如果该文件不存在，执行下面命令查找同类路由类；不要把片段盲目追加到 `routes/web.php`：
+
+```bash
+find "$XBOARD_DIR/app/Http/Routes" -type f -iname '*Passport*'
+```
+
+在现有 `PassportRoute` 类的 `passport` prefix 组内加入：
 
 ```php
 use App\Http\Controllers\V1\Passport\GoSsoController;
 
-$router->post('/auth/dujiao-sso', [GoSsoController::class, 'login']);
+$router->post('/auth/goSso', [GoSsoController::class, 'login']);
 ```
 
 仓库中的可复制片段位于 `xboard/routes.php.snippet`。
@@ -168,10 +193,19 @@ DUJIAO_SSO_FAILURE_URL=https://store.example.com/auth/login?sso=failed
 ```bash
 cd "$XBOARD_DIR"
 php artisan optimize:clear
-php artisan route:list | grep -i dujiao
+php artisan route:list | grep -i goSso
 ```
 
-成功标准：输出中存在 `POST` 和 `auth/dujiao-sso`。如果 Xboard 在 Docker 中，请在 PHP/Web 容器里执行 `php artisan optimize:clear`，然后重启该容器。
+成功标准：输出中存在 `POST` 和 `auth/goSso`。如果 Xboard 在 Docker 中，使用 Web 容器执行：
+
+```bash
+docker ps --format 'table {{.Names}}\t{{.Image}}'
+docker exec -w /www XBOARD_WEB容器名 php artisan optimize:clear
+docker exec -w /www XBOARD_WEB容器名 php artisan route:list | grep -i goSso
+docker restart XBOARD_WEB容器名
+```
+
+一键安装器会根据 `XBOARD_DIR` 的 bind mount 自动识别 Web 容器和容器内目录。
 
 ## 第 5 步：配置 Dujiao 桥接服务
 
@@ -264,57 +298,40 @@ sudo systemctl reload nginx
 
 ## 第 7 步：安装前端跨站入口
 
-需要把以下三个文件放到两个站点能公开访问的静态资源目录：
+当前生产服务器使用的原版组件已参数化保存在：
 
 ```text
-frontend/config.example.js
-frontend/bridge.css
-frontend/dujiao-entry.js
-frontend/xboard-entry.js
+templates/production/go-xboard-bridge.js.tpl
+templates/production/go-xboard-bridge.css
+templates/production/xboard-shop-ai-store.js.tpl
+templates/production/xboard-shop-ai-store.css
+templates/production/panel-logo.png
+templates/production/store-logo.png
 ```
 
-先复制配置并修改域名：
+推荐让 `install.sh` 自动替换域名、Telegram、SSO 地址和 Logo 路径并注入页面。手工部署时，不要直接公开 `.tpl`；先复制并替换所有 `__...__` 占位符：
 
 ```bash
-cd "$BRIDGE_DIR"
-sudo cp frontend/config.example.js frontend/bridge-config.js
-sudo nano frontend/bridge-config.js
+grep -Rno '__[A-Z_]*__' templates/production
 ```
 
-配置示例：
-
-```js
-window.DujiaoXboardBridge = {
-  xboardSsoUrl: 'https://panel.example.com/api/v1/passport/auth/dujiao-sso',
-  xboardLoginUrl: 'https://panel.example.com/#/login',
-  dujiaoSsoUrl: 'https://store.example.com/sso/xboard',
-  dujiaoLoginUrl: 'https://store.example.com/auth/login',
-  storeLabel: 'AI 工具/账号商店',
-  panelLabel: 'AI 专用加速器 VPN 节点'
-};
-```
-
-把 `panel.example.com`、`store.example.com` 改成自己的域名。
-
-在 Dujiao 主题的全局自定义 HTML、页脚模板或入口文件中按顺序加载：
+商城加载当前生产版：
 
 ```html
-<link rel="stylesheet" href="/assets/bridge.css?v=1">
-<script src="/assets/bridge-config.js?v=1"></script>
-<script defer src="/assets/dujiao-entry.js?v=1"></script>
+<link rel="stylesheet" href="/assets/dx-bridge/go-xboard-bridge.css?v=版本号">
+<script defer src="/assets/dx-bridge/go-xboard-bridge.js?v=版本号"></script>
 ```
 
-在 Xboard 主题中加载：
+Xboard 加载当前生产版：
 
 ```html
-<link rel="stylesheet" href="/assets/bridge.css?v=1">
-<script src="/assets/bridge-config.js?v=1"></script>
-<script defer src="/assets/xboard-entry.js?v=1"></script>
+<link rel="stylesheet" href="/assets/dx-bridge/xboard-shop-ai-store.css?v=版本号">
+<script defer src="/assets/dx-bridge/xboard-shop-ai-store.js?v=版本号"></script>
 ```
 
 主题没有“自定义 HTML”功能时，需要在源码布局文件或构建入口引入。不同主题的 DOM 结构不同，先在测试环境确认位置；不要直接覆盖主题整包。
 
-每次修改脚本后把 `?v=1` 改为 `?v=2`，避免浏览器继续使用旧缓存。
+每次修改脚本后更新查询版本号，避免浏览器继续使用旧缓存。
 
 ## 第 8 步：基础健康检查
 

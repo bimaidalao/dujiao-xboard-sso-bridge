@@ -3,5 +3,4 @@
 use App\Http\Controllers\V1\Passport\GoSsoController;
 
 // Add inside Xboard's passport route group.
-$router->post('/auth/dujiao-sso', [GoSsoController::class, 'login']);
-
+$router->post('/auth/goSso', [GoSsoController::class, 'login']);
