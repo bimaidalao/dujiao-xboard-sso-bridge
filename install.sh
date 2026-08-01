@@ -113,6 +113,8 @@ prompt_value TELEGRAM_HANDLE 'Telegram 客服用户名' "${TELEGRAM_HANDLE:-@exa
 
 XBOARD_ROUTE_FILE=${XBOARD_ROUTE_FILE:-$XBOARD_DIR/app/Http/Routes/V1/PassportRoute.php}
 prompt_value XBOARD_ROUTE_FILE 'Xboard API 路由文件' "$XBOARD_ROUTE_FILE"
+XBOARD_USER_ROUTE_FILE=${XBOARD_USER_ROUTE_FILE:-$XBOARD_DIR/app/Http/Routes/V1/UserRoute.php}
+prompt_value XBOARD_USER_ROUTE_FILE 'Xboard 用户路由文件' "$XBOARD_USER_ROUTE_FILE"
 
 XBOARD_DOCKER_CONTAINER=${XBOARD_DOCKER_CONTAINER:-}
 XBOARD_CONTAINER_DIR=${XBOARD_CONTAINER_DIR:-}
@@ -167,11 +169,13 @@ prompt_optional XBOARD_LAYOUT_FILE 'Xboard 全局 HTML/布局文件' "$XBOARD_LA
 DUJIAO_IDENTITY_URL=${DUJIAO_IDENTITY_URL:-http://127.0.0.1:18080/api/v1/me}
 XBOARD_USER_INFO_URL=${XBOARD_USER_INFO_URL:-http://127.0.0.1:7001/api/v1/user/info}
 BRIDGE_LISTEN=${BRIDGE_LISTEN:-127.0.0.1:18081}
+PANEL_ALLOWED_ORIGINS=${PANEL_ALLOWED_ORIGINS:-https://${PANEL_DOMAIN}}
 
 [[ -f "$XBOARD_DIR/artisan" ]] || die "Xboard artisan not found: $XBOARD_DIR/artisan"
 [[ -f "$XBOARD_DIR/.env" ]] || die "Xboard .env not found: $XBOARD_DIR/.env"
 [[ -d "$XBOARD_DIR/app/Http/Controllers/V1/Passport" ]] || die 'Xboard Passport controller directory not found; this version needs manual adaptation'
 [[ -f "$XBOARD_ROUTE_FILE" ]] || die "Xboard route file not found: $XBOARD_ROUTE_FILE"
+[[ -f "$XBOARD_USER_ROUTE_FILE" ]] || die "Xboard user route file not found: $XBOARD_USER_ROUTE_FILE"
 [[ -f "$DUJIAO_DB" ]] || die "Dujiao database not found: $DUJIAO_DB"
 [[ -f "$DUJIAO_CONFIG" ]] || die "Dujiao config not found: $DUJIAO_CONFIG"
 [[ -f "$STORE_NGINX_CONF" ]] || die "Nginx config not found: $STORE_NGINX_CONF"
@@ -224,7 +228,9 @@ backup_file() {
 log "备份现有配置到 $BACKUP_DIR"
 backup_file "$XBOARD_DIR/.env" xboard.env
 backup_file "$XBOARD_ROUTE_FILE" xboard-route.php
+backup_file "$XBOARD_USER_ROUTE_FILE" xboard-user-route.php
 backup_file "$XBOARD_DIR/app/Http/Controllers/V1/Passport/GoSsoController.php" GoSsoController.php
+backup_file "$XBOARD_DIR/app/Http/Controllers/V1/User/StoreOrderTicketController.php" StoreOrderTicketController.php
 backup_file "$STORE_NGINX_CONF" store-nginx.conf
 backup_file /etc/systemd/system/dujiao-xboard-bridge.service systemd-service
 backup_file /etc/dujiao-xboard-sso-bridge.env bridge.env
@@ -247,6 +253,8 @@ set_env_value() {
 
 log '安装 Xboard 控制器和路由'
 install -m 0644 "$SCRIPT_DIR/xboard/GoSsoController.php" "$XBOARD_DIR/app/Http/Controllers/V1/Passport/GoSsoController.php"
+install -m 0644 "$SCRIPT_DIR/xboard/StoreOrderTicketController.php" "$XBOARD_DIR/app/Http/Controllers/V1/User/StoreOrderTicketController.php"
+install -m 0644 "$SCRIPT_DIR/xboard/2026_08_02_060000_add_go_order_to_v2_ticket.php" "$XBOARD_DIR/database/migrations/2026_08_02_060000_add_go_order_to_v2_ticket.php"
 
 if ! grep -Fq 'use App\Http\Controllers\V1\Passport\GoSsoController;' "$XBOARD_ROUTE_FILE"; then
   grep -Fq 'use App\Http\Controllers\V1\Passport\CommController;' "$XBOARD_ROUTE_FILE" || die 'Cannot locate the Passport route imports; the original route file was not changed'
@@ -282,6 +290,16 @@ fi
 set_env_value "$XBOARD_DIR/.env" DUJIAO_IDENTITY_URL "$DUJIAO_IDENTITY_URL"
 set_env_value "$XBOARD_DIR/.env" DUJIAO_CREDENTIAL_URL "http://${BRIDGE_LISTEN}/credential.php"
 set_env_value "$XBOARD_DIR/.env" DUJIAO_SSO_FAILURE_URL "https://${STORE_DOMAIN}/auth/login?sso=failed"
+set_env_value "$XBOARD_DIR/.env" DUJIAO_PUBLIC_URL "https://${STORE_DOMAIN}"
+
+if ! grep -Fq 'use App\Http\Controllers\V1\User\StoreOrderTicketController;' "$XBOARD_USER_ROUTE_FILE"; then
+  grep -Fq 'use App\Http\Controllers\V1\User\TicketController;' "$XBOARD_USER_ROUTE_FILE" || die 'Cannot locate the Xboard TicketController import'
+  sed -i '/use App\\Http\\Controllers\\V1\\User\\TicketController;/a use App\Http\Controllers\V1\User\StoreOrderTicketController;' "$XBOARD_USER_ROUTE_FILE"
+fi
+if ! grep -Fq "[StoreOrderTicketController::class, 'save']" "$XBOARD_USER_ROUTE_FILE"; then
+  grep -Fq "[TicketController::class, 'save']" "$XBOARD_USER_ROUTE_FILE" || die 'Cannot locate the Xboard ticket save route'
+  sed -i "s/\[TicketController::class, 'save'\]/[StoreOrderTicketController::class, 'save']/" "$XBOARD_USER_ROUTE_FILE"
+fi
 
 run_artisan() {
   if [[ -n "$XBOARD_DOCKER_CONTAINER" ]]; then
@@ -292,6 +310,7 @@ run_artisan() {
 }
 
 run_artisan optimize:clear >/dev/null
+run_artisan migrate --force >/dev/null
 if ! run_artisan route:list 2>/dev/null | grep -q 'goSso'; then
   cp -a "$BACKUP_DIR/xboard-route.php" "$XBOARD_ROUTE_FILE"
   die 'Xboard did not load the new route. The route file was restored; adapt routes manually for this Xboard version.'
@@ -313,6 +332,7 @@ XBOARD_PUBLIC_URL=https://${PANEL_DOMAIN}/
 DUJIAO_IDENTITY_URL=${DUJIAO_IDENTITY_URL}
 DUJIAO_CREDENTIAL_URL=http://${BRIDGE_LISTEN}/credential.php
 XBOARD_USER_INFO_URL=${XBOARD_USER_INFO_URL}
+XBOARD_PUBLIC_ORIGINS=${PANEL_ALLOWED_ORIGINS}
 XBOARD_ENV_PATH=${XBOARD_DIR}/.env
 DUJIAO_CONFIG_PATH=${DUJIAO_CONFIG}
 DUJIAO_DATABASE_PATH=${DUJIAO_DB}
@@ -374,6 +394,15 @@ location = /sso/xboard {
     proxy_set_header X-Forwarded-Proto \$scheme;
     add_header Cache-Control "no-store" always;
 }
+location = /sso/orders {
+    client_max_body_size 16k;
+    proxy_pass http://${BRIDGE_LISTEN}/orders.php;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+    add_header Cache-Control "no-store" always;
+}
 EOF
 
 NGINX_INCLUDE='include /etc/nginx/snippets/dujiao-xboard-sso-bridge.conf;'
@@ -405,6 +434,7 @@ render_production_template() {
   content=${content//__PANEL_SSO_URL__/https:\/\/${PANEL_DOMAIN}\/api\/v1\/passport\/auth\/goSso}
   content=${content//__STORE_URL__/https:\/\/${STORE_DOMAIN}\/}
   content=${content//__STORE_SSO_URL__/https:\/\/${STORE_DOMAIN}\/sso\/xboard}
+  content=${content//__STORE_ORDER_API__/https:\/\/${STORE_DOMAIN}\/sso\/orders}
   content=${content//__TELEGRAM_URL__/$TELEGRAM_URL}
   content=${content//__TELEGRAM_HANDLE__/$TELEGRAM_HANDLE}
   content=${content//__PANEL_LOGO_URL__/\/assets\/dx-bridge\/panel-logo.png}
@@ -448,6 +478,27 @@ install_frontend() {
 
 install_frontend dujiao "${DUJIAO_PUBLIC_DIR:-}" "${DUJIAO_LAYOUT_FILE:-}" go-xboard-bridge.js go-xboard-bridge.css panel-logo.png
 install_frontend xboard "${XBOARD_PUBLIC_DIR:-}" "${XBOARD_LAYOUT_FILE:-}" xboard-shop-ai-store.js xboard-shop-ai-store.css store-logo.png
+
+if [[ -n ${XBOARD_PUBLIC_DIR:-} ]]; then
+  order_asset_dir="$XBOARD_PUBLIC_DIR/assets/dx-bridge"
+  install -m 0644 "$SCRIPT_DIR/templates/production/order-ticket-ui.css" "$order_asset_dir/order-ticket-ui.css"
+  render_production_template "$SCRIPT_DIR/templates/production/order-ticket-ui.js.tpl" "$order_asset_dir/order-ticket-ui.js"
+  if [[ -n ${XBOARD_LAYOUT_FILE:-} ]] && ! grep -Fq 'dx-bridge-order-ticket' "$XBOARD_LAYOUT_FILE"; then
+    temporary=$(mktemp)
+    awk -v stamp="$STAMP" '
+      !inserted && /<\/body>/ {
+        print "<!-- dx-bridge-order-ticket -->"
+        print "<link rel=\"stylesheet\" href=\"/assets/dx-bridge/order-ticket-ui.css?v=" stamp "\">"
+        print "<script defer src=\"/assets/dx-bridge/order-ticket-ui.js?v=" stamp "\"></script>"
+        inserted=1
+      }
+      { print }
+      END { if (!inserted) exit 42 }
+    ' "$XBOARD_LAYOUT_FILE" > "$temporary" || die 'Could not inject the order-ticket frontend assets'
+    cat "$temporary" > "$XBOARD_LAYOUT_FILE"
+    rm -f "$temporary"
+  fi
+fi
 
 log '执行最终健康检查'
 systemctl is-active --quiet dujiao-xboard-bridge.service || die 'Bridge service is not active'
