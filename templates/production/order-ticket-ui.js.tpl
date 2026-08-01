@@ -75,7 +75,7 @@
 
     var wrapper = document.createElement('div');
     wrapper.id = 'ai-store-ticket-order';
-    wrapper.innerHTML = '<label for="ai-store-ticket-order-select">关联 AI 工具商店订单 <small>（可选）</small></label><select id="ai-store-ticket-order-select" disabled><option value="">正在读取当前账号订单…</option></select><p>节点套餐信息仍会自动附带；此处只追加所选商城订单的订单号、商品、金额、状态和时间，不读取卡密或交付内容。</p>';
+    wrapper.innerHTML = '<label for="ai-store-ticket-order-select">本次问题与哪个 AI 工具订单有关？ <small>（可选）</small></label><select id="ai-store-ticket-order-select" disabled><option value="">正在读取当前账号订单…</option></select><p>如需处理 GPT、Gemini 等商品问题，请选择对应订单；节点套餐信息会自动附带。</p>';
     var labels = dialog.querySelectorAll('label');
     var messageContainer = null;
     for (var i = 0; i < labels.length; i += 1) {
@@ -96,7 +96,7 @@
     select.addEventListener('change', function () { selectedOrderId = select.value || ''; });
     loadOrders().then(function (orders) {
       if (!document.body.contains(select)) return;
-      select.innerHTML = '<option value="">不关联商城订单</option>';
+      select.innerHTML = '<option value="">与 AI 工具订单无关</option>';
       orders.forEach(function (order) {
         var option = document.createElement('option');
         option.value = String(order.id);
