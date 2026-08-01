@@ -4,6 +4,7 @@ namespace App\Http\Controllers\V1\User;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\User\TicketSave;
+use App\Models\Order;
 use App\Services\Plugin\HookManager;
 use App\Services\TicketService;
 use Illuminate\Support\Facades\Log;
@@ -12,7 +13,6 @@ class StoreOrderTicketController extends Controller
 {
     private function fetchStoreOrder(TicketSave $request, int $orderId): ?array
     {
-        if ($orderId < 1) return null;
         $authorization = trim((string) $request->header('Authorization', ''));
         if ($authorization === '') return null;
 
@@ -22,7 +22,10 @@ class StoreOrderTicketController extends Controller
             CURLOPT_TIMEOUT => 8,
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => ['Accept: application/json', 'Content-Type: application/json'],
-            CURLOPT_POSTFIELDS => json_encode(['xboard_auth' => $authorization, 'order_id' => $orderId]),
+            CURLOPT_POSTFIELDS => json_encode(array_filter([
+                'xboard_auth' => $authorization,
+                'order_id' => $orderId > 0 ? $orderId : null,
+            ], static fn ($value) => $value !== null)),
         ]);
         $body = curl_exec($curl);
         $status = (int) curl_getinfo($curl, CURLINFO_HTTP_CODE);
@@ -33,7 +36,25 @@ class StoreOrderTicketController extends Controller
         }
         $payload = json_decode($body, true);
         $order = is_array($payload['orders'][0] ?? null) ? $payload['orders'][0] : null;
-        return $order && (int) ($order['id'] ?? 0) === $orderId ? $order : null;
+        if (!$order) return null;
+        return $orderId < 1 || (int) ($order['id'] ?? 0) === $orderId ? $order : null;
+    }
+
+    private function appendNodeOrderSummary(string $message, int $userId): string
+    {
+        $order = Order::with('plan')->where('user_id', $userId)->orderByDesc('created_at')->first();
+        if (!$order) return $message;
+        $periodMap = ['monthly' => '月付', 'quarterly' => '季付', 'half_yearly' => '半年付', 'yearly' => '年付', 'two_yearly' => '两年付', 'three_yearly' => '三年付', 'onetime' => '一次性', 'reset_traffic' => '流量重置'];
+        return rtrim($message) . "\n\n" . implode("\n", [
+            '[跨境速云最近订单]',
+            '订单号：' . $order->trade_no,
+            '套餐：' . ($order->plan->name ?? '套餐已下架'),
+            '类型：' . (Order::$typeMap[$order->type] ?? (string) $order->type),
+            '周期：' . ($periodMap[$order->period] ?? $order->period),
+            '金额：' . number_format(((int) $order->total_amount) / 100, 2) . ' CNY',
+            '状态：' . (Order::$statusMap[$order->status] ?? (string) $order->status),
+            '下单时间：' . date('Y-m-d H:i:s', (int) $order->created_at),
+        ]);
     }
 
     private function appendOrderSummary(string $message, array $order): string
@@ -63,7 +84,7 @@ class StoreOrderTicketController extends Controller
         if ($orderId > 0 && !$order) {
             return $this->fail([422, '所选 AI 工具商店订单无效或不属于当前账号']);
         }
-        $message = (string) $request->input('message');
+        $message = $this->appendNodeOrderSummary((string) $request->input('message'), (int) $request->user()->id);
         if ($order) $message = $this->appendOrderSummary($message, $order);
 
         $ticket = (new TicketService())->createTicket(
