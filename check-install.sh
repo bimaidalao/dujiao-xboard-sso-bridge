@@ -22,6 +22,8 @@ check '桥接仅监听本机端口' sh -c "ss -lnt | grep -q '127.0.0.1:18081'"
 check 'Nginx 配置有效' nginx -t
 check 'Xboard 控制器已安装' test -f "${XBOARD_DIR:-/opt/xboard}/app/Http/Controllers/V1/Passport/GoSsoController.php"
 check '商城订单工单控制器已安装' test -f "${XBOARD_DIR:-/opt/xboard}/app/Http/Controllers/V1/User/StoreOrderTicketController.php"
+check '双系统最近订单逻辑已安装' grep -Fq 'appendNodeOrderSummary' "${XBOARD_DIR:-/opt/xboard}/app/Http/Controllers/V1/User/StoreOrderTicketController.php"
+check '安装状态文件存在' test -r /var/lib/dujiao-xboard-sso-bridge/state.env
 
 if [[ -n "$STORE_DOMAIN" ]]; then
   check '商城首页可访问' curl -fsSI --max-time 15 "https://$STORE_DOMAIN/"
