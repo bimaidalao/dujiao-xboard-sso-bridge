@@ -186,6 +186,12 @@ docs/                   功能、架构、部署、安全和故障排查文档
 - [安全说明](docs/SECURITY.md)
 - [故障排查与回滚](docs/TROUBLESHOOTING.md)
 
+## Telegram 双向媒体工单
+
+可选安装的客服机器人模块支持文字、表情、图片和视频双向同步。客服在 Telegram 引用任意带工单编号的通知即可回复网站工单；网站上传的媒体也会同步到 Telegram。媒体使用私有存储和登录鉴权，单文件限制为 20MB。
+
+安装、配置、备份和回滚步骤见 [Telegram 双向媒体工单](xboard/telegram-ticket/README.md)。
+
 ## License
 
 本集成层使用 [MIT License](LICENSE)。使用者仍需自行确认 Dujiao Next、Xboard 以及所用主题资源的许可证和二次开发条款。
