@@ -155,6 +155,9 @@ templates/production/   从当前生产服务器提取并参数化的真实前�
 bootstrap.sh            单网址下载与启动入口
 install.sh              交互式/无人值守一键安装器
 check-install.sh        安装后的健康检查
+bin/dx-bridge           安装、更新、检查、校验和回滚的统一命令
+lib/                    安装器共享函数，避免根脚本重复堆叠
+scripts/                发布校验与安全回滚脚本
 deploy/                 Nginx、systemd 配置示例
 docs/images/            已脱敏的真实效果截图
 docs/                   功能、架构、部署、安全和故障排查文档
@@ -173,6 +176,7 @@ docs/                   功能、架构、部署、安全和故障排查文档
 
 ## 文档导航
 
+- [成品仓库结构与维护方式](docs/REPOSITORY.md)
 - [AI 商店订单关联工单与手机端遮挡修复](docs/ORDER_TICKET_LINK.md)
 
 - [二开功能详细说明](docs/FEATURES.md)
