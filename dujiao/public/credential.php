@@ -19,7 +19,24 @@ function output(int $status, array $payload): void
     exit;
 }
 
-if (!in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true)) {
+function trustedClient(string $address): bool
+{
+    $rules = array_filter(array_map('trim', explode(',', value('BRIDGE_TRUSTED_CLIENTS'))));
+    foreach ($rules as $rule) {
+        if ($address === $rule) return true;
+        if (strpos($rule, '/') === false || filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) continue;
+        [$network, $prefix] = explode('/', $rule, 2);
+        $networkLong = ip2long($network);
+        $addressLong = ip2long($address);
+        $bits = (int) $prefix;
+        if ($networkLong === false || $addressLong === false || $bits < 0 || $bits > 32) continue;
+        $mask = $bits === 0 ? 0 : (-1 << (32 - $bits));
+        if (($networkLong & $mask) === ($addressLong & $mask)) return true;
+    }
+    return false;
+}
+
+if (!trustedClient((string) ($_SERVER['REMOTE_ADDR'] ?? ''))) {
     output(403, ['error' => 'local_requests_only']);
 }
 
