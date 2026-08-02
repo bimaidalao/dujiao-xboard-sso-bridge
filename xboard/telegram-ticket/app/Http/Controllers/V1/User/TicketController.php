@@ -23,7 +23,7 @@ class TicketController extends Controller
     {
         $ids = array_values(array_unique(array_filter((array) $request->input('media_ids', []))));
         if (count($ids) > 4) {
-            abort(422, '姣忔潯娑堟伅鏈€澶氫笂浼?4 涓獟浣?);
+            abort(422, '每条消息最多上传 4 个媒体');
         }
         if ($ids === []) {
             return collect();
@@ -33,7 +33,7 @@ class TicketController extends Controller
             ->whereNull('ticket_id')
             ->get();
         if ($media->count() !== count($ids)) {
-            abort(422, '闄勪欢鏃犳晥銆佸凡浣跨敤鎴栦笉灞炰簬褰撳墠璐﹀彿');
+            abort(422, '附件无效、已使用或不属于当前账号');
         }
         return $media;
     }
@@ -110,36 +110,36 @@ class TicketController extends Controller
     {
         $order = Order::with('plan')->where('user_id', $userId)->orderByDesc('created_at')->first();
         if (!$order) return $message;
-        $periodMap = ['monthly' => '鏈堜粯', 'quarterly' => '瀛ｄ粯', 'half_yearly' => '鍗婂勾浠?, 'yearly' => '骞翠粯', 'two_yearly' => '涓ゅ勾浠?, 'three_yearly' => '涓夊勾浠?, 'onetime' => '涓€娆℃€?, 'reset_traffic' => '娴侀噺閲嶇疆'];
+        $periodMap = ['monthly' => '月付', 'quarterly' => '季付', 'half_yearly' => '半年付', 'yearly' => '年付', 'two_yearly' => '两年付', 'three_yearly' => '三年付', 'onetime' => '一次性', 'reset_traffic' => '流量重置'];
         return rtrim($message) . "\n\n" . implode("\n", [
-            '[璺ㄥ閫熶簯鏈€杩戣鍗昡',
-            '璁㈠崟鍙凤細' . $order->trade_no,
-            '濂楅锛? . ($order->plan->name ?? '濂楅宸蹭笅鏋?),
-            '绫诲瀷锛? . (Order::$typeMap[$order->type] ?? (string) $order->type),
-            '鍛ㄦ湡锛? . ($periodMap[$order->period] ?? $order->period),
-            '閲戦锛? . number_format(((int) $order->total_amount) / 100, 2) . ' CNY',
-            '鐘舵€侊細' . (Order::$statusMap[$order->status] ?? (string) $order->status),
-            '涓嬪崟鏃堕棿锛? . date('Y-m-d H:i:s', (int) $order->created_at),
+            '[跨境速云最近订单]',
+            '订单号：' . $order->trade_no,
+            '套餐：' . ($order->plan->name ?? '套餐已下架'),
+            '类型：' . (Order::$typeMap[$order->type] ?? (string) $order->type),
+            '周期：' . ($periodMap[$order->period] ?? $order->period),
+            '金额：' . number_format(((int) $order->total_amount) / 100, 2) . ' CNY',
+            '状态：' . (Order::$statusMap[$order->status] ?? (string) $order->status),
+            '下单时间：' . date('Y-m-d H:i:s', (int) $order->created_at),
         ]);
     }
 
     private function appendStoreOrderSummary(string $message, array $order): string
     {
-        $products = implode('銆?, array_map('strval', (array) ($order['products'] ?? [])));
+        $products = implode('、', array_map('strval', (array) ($order['products'] ?? [])));
         $statusMap = [
-            'pending' => '寰呭鐞?, 'unpaid' => '寰呮敮浠?, 'paid' => '宸叉敮浠?, 'processing' => '澶勭悊涓?,
-            'delivered' => '宸蹭氦浠?, 'completed' => '宸插畬鎴?, 'canceled' => '宸插彇娑?, 'cancelled' => '宸插彇娑?,
-            'refunded' => '宸查€€娆?, 'failed' => '澶辫触',
+            'pending' => '待处理', 'unpaid' => '待支付', 'paid' => '已支付', 'processing' => '处理中',
+            'delivered' => '已交付', 'completed' => '已完成', 'canceled' => '已取消', 'cancelled' => '已取消',
+            'refunded' => '已退款', 'failed' => '失败',
         ];
         $rawStatus = strtolower((string) ($order['status'] ?? ''));
-        $status = $statusMap[$rawStatus] ?? ($order['status'] ?? '鏈煡鐘舵€?);
+        $status = $statusMap[$rawStatus] ?? ($order['status'] ?? '未知状态');
         $lines = [
-            '[鍏宠仈 AI 宸ュ叿鍟嗗簵璁㈠崟]',
-            '璁㈠崟鍙凤細' . ($order['order_no'] ?? ''),
-            '鍟嗗搧锛? . ($products !== '' ? $products : '鏈懡鍚嶅晢鍝?),
-            '閲戦锛? . ($order['amount'] ?? '0.00') . ' ' . ($order['currency'] ?? ''),
-            '璁㈠崟鐘舵€侊細' . $status,
-            '涓嬪崟鏃堕棿锛? . ($order['created_at'] ?? ''),
+            '[关联 AI 工具商店订单]',
+            '订单号：' . ($order['order_no'] ?? ''),
+            '商品：' . ($products !== '' ? $products : '未命名商品'),
+            '金额：' . ($order['amount'] ?? '0.00') . ' ' . ($order['currency'] ?? ''),
+            '订单状态：' . $status,
+            '下单时间：' . ($order['created_at'] ?? ''),
         ];
         return rtrim($message) . "\n\n" . implode("\n", $lines);
     }
@@ -150,7 +150,7 @@ class TicketController extends Controller
         $orderId = (int) $request->input('go_order_id', 0);
         $order = $this->fetchStoreOrder($request, $orderId);
         if ($orderId > 0 && !$order) {
-            return $this->fail([422, '鎵€閫?AI 宸ュ叿鍟嗗簵璁㈠崟鏃犳晥鎴栦笉灞炰簬褰撳墠璐﹀彿']);
+            return $this->fail([422, '所选 AI 工具商店订单无效或不属于当前账号']);
         }
         $message = $this->appendNodeOrderSummary((string) $request->input('message'), (int) $request->user()->id);
         if ($order) {
@@ -218,7 +218,7 @@ class TicketController extends Controller
         $limit = admin_setting('commission_withdraw_limit', 100);
         if ($limit > ($user->commission_balance / 100)) return $this->fail([422, __('The current required minimum withdrawal commission is :limit', ['limit' => $limit])]);
         $ticketService = new TicketService();
-        $message = sprintf("%s\r\n%s", __('Withdrawal method') . '锛? . $request->input('withdraw_method'), __('Withdrawal account') . '锛? . $request->input('withdraw_account'));
+        $message = sprintf("%s\r\n%s", __('Withdrawal method') . '：' . $request->input('withdraw_method'), __('Withdrawal account') . '：' . $request->input('withdraw_account'));
         $ticket = $ticketService->createTicket($request->user()->id, __('[Commission Withdrawal Request] This ticket is opened by the system'), 2, $message);
         HookManager::call('ticket.create.after', $ticket);
         return $this->success(true);
