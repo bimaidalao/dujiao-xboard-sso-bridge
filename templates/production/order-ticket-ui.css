@@ -1,9 +1,3 @@
-#ai-store-ticket-order { margin-top:14px; }
-#ai-store-ticket-order label { display:block;margin-bottom:6px;font-size:14px;font-weight:600; }
-#ai-store-ticket-order label small { color:#64748b;font-weight:400; }
-#ai-store-ticket-order select { width:100%;min-height:38px;padding:0 34px 0 12px;border:1px solid rgba(148,163,184,.45);border-radius:8px;color:inherit;background:rgba(255,255,255,.08); }
-#ai-store-ticket-order p { margin:6px 0 0;color:#64748b;font-size:12px;line-height:1.5; }
-
 @media (max-width:904px) {
   body.ai-store-ticket-modal-open #xboard-ai-account-store-card,
   body.ai-store-ticket-modal-open .xboard-ai-store-float,
@@ -13,5 +7,4 @@
   .ai-store-ticket-dialog { max-height:calc(100dvh - 20px) !important;overflow-x:hidden !important;overflow-y:auto !important;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;padding-bottom:calc(20px + env(safe-area-inset-bottom)) !important;scrollbar-width:thin; }
   .ai-store-ticket-dialog form,
   .ai-store-ticket-dialog > div { min-height:0; }
-  #ai-store-ticket-order select { font-size:16px; }
 }
