@@ -36,5 +36,5 @@ else
   git clone --branch "$BRANCH" --depth 1 "$REPOSITORY_URL" "$INSTALL_DIR"
 fi
 
-info '启动交互式安装器'
-exec bash "$INSTALL_DIR/install.sh" "$@" </dev/tty
+info '启动统一安装命令'
+exec bash "$INSTALL_DIR/bin/dx-bridge" install "$@" </dev/tty
