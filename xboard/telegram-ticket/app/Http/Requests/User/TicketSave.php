@@ -25,8 +25,8 @@ class TicketSave extends FormRequest
             'level.required' => __('Ticket level cannot be empty'),
             'level.in' => __('Incorrect ticket level format'),
             'message.required' => __('Message cannot be empty'),
-            'message.required_without' => '娑堟伅鍐呭鍜岄檮浠朵笉鑳藉悓鏃朵负绌?,
-            'go_order_id.integer' => 'AI 宸ュ叿鍟嗗簵璁㈠崟鏍煎紡涓嶆纭?,
+            'message.required_without' => '消息内容和附件不能同时为空',
+            'go_order_id.integer' => 'AI 工具商店订单格式不正确',
         ];
     }
 }
