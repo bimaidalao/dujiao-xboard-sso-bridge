@@ -26,7 +26,7 @@ class TicketMediaController extends Controller
         $file = $request->file('file');
         $mime = strtolower((string) $file->getMimeType());
         if (!isset(self::MIME_MAP[$mime])) {
-            return $this->fail([422, '浠呮敮鎸?JPG銆丳NG銆丟IF銆乄EBP銆丮P4銆乄EBM 鍜?MOV']);
+            return $this->fail([422, '仅支持 JPG、PNG、GIF、WEBP、MP4、WEBM 和 MOV']);
         }
 
         [$kind, $extension] = self::MIME_MAP[$mime];
