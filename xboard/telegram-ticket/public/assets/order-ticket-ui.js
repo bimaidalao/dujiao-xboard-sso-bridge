@@ -10,11 +10,11 @@
 
   function statusLabel(status) {
     var labels = {
-      pending: '寰呭鐞?, unpaid: '寰呮敮浠?, paid: '宸叉敮浠?, processing: '澶勭悊涓?,
-      delivered: '宸蹭氦浠?, completed: '宸插畬鎴?, canceled: '宸插彇娑?, cancelled: '宸插彇娑?,
-      refunded: '宸查€€娆?, failed: '澶辫触'
+      pending: '待处理', unpaid: '待支付', paid: '已支付', processing: '处理中',
+      delivered: '已交付', completed: '已完成', canceled: '已取消', cancelled: '已取消',
+      refunded: '已退款', failed: '失败'
     };
-    return labels[String(status || '').toLowerCase()] || status || '鏈煡鐘舵€?;
+    return labels[String(status || '').toLowerCase()] || status || '未知状态';
   }
 
   function getAuth() {
@@ -51,14 +51,14 @@
     for (var i = 0; i < candidates.length; i += 1) {
       if (!candidates[i].getClientRects().length) continue;
       var text = candidates[i].textContent || '';
-      if (text.indexOf('鏂扮殑宸ュ崟') !== -1 || text.indexOf('鏂板缓宸ュ崟') !== -1 || text.indexOf('鍒涘缓宸ュ崟') !== -1 || text.indexOf('My Tickets') !== -1) return candidates[i];
+      if (text.indexOf('新的工单') !== -1 || text.indexOf('新建工单') !== -1 || text.indexOf('创建工单') !== -1 || text.indexOf('My Tickets') !== -1) return candidates[i];
     }
-    var subject = document.querySelector('input[placeholder*="宸ュ崟涓婚"], input[placeholder*="ticket subject" i]');
+    var subject = document.querySelector('input[placeholder*="工单主题"], input[placeholder*="ticket subject" i]');
     if (subject && subject.getClientRects().length) {
       var parent = subject.parentElement;
       for (var depth = 0; parent && depth < 8; depth += 1, parent = parent.parentElement) {
         var parentText = parent.textContent || '';
-        if (parentText.indexOf('鏂板缓宸ュ崟') !== -1 || parentText.indexOf('鍒涘缓宸ュ崟') !== -1 || parentText.indexOf('鏂扮殑宸ュ崟') !== -1) return parent;
+        if (parentText.indexOf('新建工单') !== -1 || parentText.indexOf('创建工单') !== -1 || parentText.indexOf('新的工单') !== -1) return parent;
       }
     }
     return null;
@@ -77,8 +77,8 @@
       media.onload = media.onloadedmetadata = function () { URL.revokeObjectURL(url); };
       var remove = document.createElement('button');
       remove.type = 'button';
-      remove.textContent = '脳';
-      remove.setAttribute('aria-label', '绉婚櫎闄勪欢');
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', '移除附件');
       remove.addEventListener('click', function () {
         wrapper.__ticketFiles.splice(index, 1);
         renderPicker(wrapper);
@@ -95,9 +95,9 @@
     var wrapper = document.createElement('div');
     wrapper.className = 'ticket-media-picker';
     wrapper.__ticketFiles = [];
-    wrapper.innerHTML = '<button type="button" class="ticket-media-choose">锛?鍥剧墖 / 琛ㄦ儏鍖?/ 瑙嗛</button>' +
+    wrapper.innerHTML = '<button type="button" class="ticket-media-choose">＋ 图片 / 表情包 / 视频</button>' +
       '<input class="ticket-media-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime" multiple hidden>' +
-      '<small>鏈€澶?涓紝鍗曚釜涓嶈秴杩?0MB</small><div class="ticket-media-preview"></div>';
+      '<small>最多4个，单个不超过20MB</small><div class="ticket-media-preview"></div>';
     var input = wrapper.querySelector('input');
     wrapper.querySelector('.ticket-media-choose').addEventListener('click', function () { input.click(); });
     input.addEventListener('change', function () {
@@ -105,11 +105,11 @@
       files.forEach(function (file) {
         if (wrapper.__ticketFiles.length >= MAX_MEDIA) return;
         if (file.size > MAX_MEDIA_BYTES) {
-          window.alert(file.name + ' 瓒呰繃20MB锛屾湭娣诲姞');
+          window.alert(file.name + ' 超过20MB，未添加');
           return;
         }
         if (!/^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/i.test(file.type)) {
-          window.alert(file.name + ' 鏍煎紡涓嶆敮鎸?);
+          window.alert(file.name + ' 格式不支持');
           return;
         }
         wrapper.__ticketFiles.push(file);
@@ -154,21 +154,21 @@
 
     var wrapper = document.createElement('div');
     wrapper.id = 'ai-store-ticket-order';
-    wrapper.innerHTML = '<label for="ai-store-ticket-order-select">闇€瑕佸叧鑱斿摢绗旇喘涔拌褰曪紵 <small>锛堝彲閫夛級</small></label>' +
-      '<select id="ai-store-ticket-order-select" disabled><option value="">姝ｅ湪璇诲彇褰撳墠璐﹀彿璁㈠崟鈥?/option></select>' +
-      '<p>鎵句笉鍒板搴旇鍗曚篃娌″叧绯伙紱绯荤粺浼氳嚜鍔ㄩ檮甯﹀綋鍓嶈处鍙峰拰鑺傜偣濂楅淇℃伅銆?/p>';
+    wrapper.innerHTML = '<label for="ai-store-ticket-order-select">需要关联哪笔购买记录？ <small>（可选）</small></label>' +
+      '<select id="ai-store-ticket-order-select" disabled><option value="">正在读取当前账号订单…</option></select>' +
+      '<p>找不到对应订单也没关系；系统会自动附带当前账号和节点套餐信息。</p>';
 
     var labels = dialog.querySelectorAll('label');
     var messageContainer = null;
     for (var i = 0; i < labels.length; i += 1) {
       var labelText = labels[i].textContent || '';
-      if (labelText.indexOf('娑堟伅') !== -1 || labelText.indexOf('鍐呭') !== -1 || labelText.indexOf('Message') !== -1) {
+      if (labelText.indexOf('消息') !== -1 || labelText.indexOf('内容') !== -1 || labelText.indexOf('Message') !== -1) {
         messageContainer = labels[i].parentElement;
         break;
       }
     }
     if (!messageContainer) {
-      var textarea = dialog.querySelector('textarea[placeholder*="鎻忚堪"], textarea');
+      var textarea = dialog.querySelector('textarea[placeholder*="描述"], textarea');
       if (textarea) messageContainer = textarea.parentElement;
     }
     if (messageContainer && messageContainer.parentNode) messageContainer.parentNode.insertBefore(wrapper, messageContainer);
@@ -178,15 +178,15 @@
     select.addEventListener('change', function () { selectedOrderId = select.value || ''; });
     loadOrders().then(function (orders) {
       if (!document.body.contains(select)) return;
-      select.innerHTML = '<option value="">涓嶉€夋嫨锛岀洿鎺ユ彁浜?/option>';
+      select.innerHTML = '<option value="">不选择，直接提交</option>';
       orders.forEach(function (order) {
         var option = document.createElement('option');
         option.value = String(order.id);
-        option.textContent = order.order_no + ' 路 ' + (order.products || []).join('銆?) + ' 路 ' + order.amount + ' ' + order.currency + ' 路 ' + statusLabel(order.status);
+        option.textContent = order.order_no + ' · ' + (order.products || []).join('、') + ' · ' + order.amount + ' ' + order.currency + ' · ' + statusLabel(order.status);
         select.appendChild(option);
       });
       select.disabled = false;
-      if (!orders.length) select.options[0].textContent = '褰撳墠璐﹀彿鏆傛棤鍙叧鑱旇鍗?;
+      if (!orders.length) select.options[0].textContent = '当前账号暂无可关联订单';
     });
   }
 
@@ -252,11 +252,11 @@
         headers: { Authorization: getAuth() },
         body: form
       }).then(function (response) {
-        if (!response.ok) throw new Error('涓婁紶澶辫触锛? + file.name);
+        if (!response.ok) throw new Error('上传失败：' + file.name);
         return response.json();
       }).then(function (payload) {
         var id = payload && payload.data && payload.data.id;
-        if (!id) throw new Error('涓婁紶杩斿洖寮傚父锛? + file.name);
+        if (!id) throw new Error('上传返回异常：' + file.name);
         return id;
       });
     }));
@@ -284,7 +284,7 @@
         holder.className = 'ticket-media-render';
         holder.dataset.mediaId = match[1];
         holder.dataset.mediaKind = match[2].toLowerCase();
-        holder.textContent = '姝ｅ湪鍔犺浇濯掍綋鈥?;
+        holder.textContent = '正在加载媒体…';
         fragment.appendChild(holder);
         loadRenderedMedia(holder);
         last = regex.lastIndex;
@@ -315,7 +315,7 @@
       holder.textContent = '';
       holder.appendChild(media);
     }).catch(function () {
-      holder.textContent = '濯掍綋鍔犺浇澶辫触';
+      holder.textContent = '媒体加载失败';
       holder.classList.add('ticket-media-error');
     });
   }
@@ -338,7 +338,7 @@
       clearPendingMedia();
       originalSend.call(xhr, addMediaToBody(body, ids));
     }).catch(function (error) {
-      window.alert(error.message || '濯掍綋涓婁紶澶辫触');
+      window.alert(error.message || '媒体上传失败');
     });
   };
 
