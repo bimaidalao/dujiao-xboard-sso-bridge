@@ -11,7 +11,7 @@ function orderEnv(string $name): string
     return $value;
 }
 
-function orderRespond(int $status, array $payload): never
+function orderRespond(int $status, array $payload): void
 {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');

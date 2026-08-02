@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+COMMAND=${1:-help}
+[[ $# -eq 0 ]] || shift
+
+load_runtime_config() {
+  local runtime=/etc/dujiao-xboard-sso-bridge.env
+  [[ -r "$runtime" ]] || return 0
+  set -a
+  # shellcheck disable=SC1090
+  source "$runtime"
+  set +a
+  STORE_DOMAIN=${DUJIAO_PUBLIC_URL#*://}; STORE_DOMAIN=${STORE_DOMAIN%%/*}
+  PANEL_DOMAIN=${XBOARD_PUBLIC_URL#*://}; PANEL_DOMAIN=${PANEL_DOMAIN%%/*}
+  XBOARD_DIR=${XBOARD_ENV_PATH%/.env}
+  export STORE_DOMAIN PANEL_DOMAIN XBOARD_DIR
+}
+
+case "$COMMAND" in
+  install)
+    exec bash "$ROOT_DIR/install.sh" "$@"
+    ;;
+  update)
+    exec env INSTALL_DIR="$ROOT_DIR" bash "$ROOT_DIR/bootstrap.sh" "$@"
+    ;;
+  check|doctor)
+    load_runtime_config
+    exec bash "$ROOT_DIR/check-install.sh" "$@"
+    ;;
+  rollback)
+    exec bash "$ROOT_DIR/scripts/rollback.sh" "$@"
+    ;;
+  validate)
+    exec bash "$ROOT_DIR/scripts/validate.sh" "$@"
+    ;;
+  version|--version|-v)
+    printf 'dx-bridge %s\n' "$(<"$ROOT_DIR/VERSION")"
+    ;;
+  help|--help|-h)
+    cat <<'EOF'
+Usage: dx-bridge <command> [options]
+
+Commands:
+  install    Detect and install the integration
+  update     Pull the configured branch and rerun the installer
+  check      Check services, routes and public endpoints
+  rollback   Restore a timestamped installer backup
+  validate   Run repository syntax and packaging checks
+  version    Print the installed package version
+EOF
+    ;;
+  *)
+    printf '[FAIL] Unknown command: %s\n' "$COMMAND" >&2
+    exit 2
+    ;;
+esac

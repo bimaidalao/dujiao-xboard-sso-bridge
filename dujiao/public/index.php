@@ -14,7 +14,7 @@ function envValue(string $name, ?string $default = null): string
     return $value;
 }
 
-function failRedirect(): never
+function failRedirect(): void
 {
     header('Location: ' . rtrim(envValue('DUJIAO_PUBLIC_URL'), '/') . '/auth/login?sso=failed', true, 302);
     exit;
