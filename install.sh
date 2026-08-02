@@ -9,10 +9,8 @@ CONFIG_FILE=''
 ASSUME_YES=0
 DRY_RUN=0
 
-log() { printf '\033[1;34m[INFO]\033[0m %s\n' "$*"; }
-ok() { printf '\033[1;32m[ OK ]\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[WARN]\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31m[FAIL]\033[0m %s\n' "$*" >&2; exit 1; }
+# shellcheck source=lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
 
 usage() {
   cat <<'EOF'
@@ -40,6 +38,7 @@ done
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || die 'Run this installer as root: sudo bash install.sh'
 [[ -f "$SCRIPT_DIR/dujiao/public/index.php" ]] || die "Run install.sh from a complete $PROJECT_NAME checkout"
+[[ -s "$SCRIPT_DIR/VERSION" ]] || die 'Package VERSION is missing'
 
 if [[ -n "$CONFIG_FILE" ]]; then
   [[ -f "$CONFIG_FILE" ]] || die "Config file not found: $CONFIG_FILE"
@@ -47,38 +46,9 @@ if [[ -n "$CONFIG_FILE" ]]; then
   source "$CONFIG_FILE"
 fi
 
-require_command() { command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 for command_name in awk cp curl find grep install nginx php sed systemctl; do
   require_command "$command_name"
 done
-
-prompt_value() {
-  local variable=$1 label=$2 default=${3:-} value=''
-  value=${!variable:-}
-  if [[ -z "$value" && $ASSUME_YES -eq 0 ]]; then
-    if [[ -n "$default" ]]; then
-      read -r -p "$label [$default]: " value
-      value=${value:-$default}
-    else
-      read -r -p "$label: " value
-    fi
-  fi
-  [[ -n "$value" ]] || die "$label is required"
-  printf -v "$variable" '%s' "$value"
-}
-
-prompt_optional() {
-  local variable=$1 label=$2 default=${3:-} value=${!1:-}
-  if [[ -z "$value" && $ASSUME_YES -eq 0 ]]; then
-    read -r -p "$label${default:+ [$default]} (留空跳过): " value
-    value=${value:-$default}
-  fi
-  printf -v "$variable" '%s' "$value"
-}
-
-first_match() {
-  find "$@" 2>/dev/null | head -n 1 || true
-}
 
 log '检测常见安装路径'
 XBOARD_DIR=${XBOARD_DIR:-}
@@ -166,9 +136,28 @@ prompt_optional DUJIAO_LAYOUT_FILE 'Dujiao 全局 HTML/布局文件' "$DUJIAO_LA
 prompt_optional XBOARD_PUBLIC_DIR 'Xboard 静态资源根目录' "$XBOARD_PUBLIC_DIR"
 prompt_optional XBOARD_LAYOUT_FILE 'Xboard 全局 HTML/布局文件' "$XBOARD_LAYOUT_FILE"
 
-DUJIAO_IDENTITY_URL=${DUJIAO_IDENTITY_URL:-http://127.0.0.1:18080/api/v1/me}
-XBOARD_USER_INFO_URL=${XBOARD_USER_INFO_URL:-http://127.0.0.1:7001/api/v1/user/info}
+DUJIAO_IDENTITY_URL=${DUJIAO_IDENTITY_URL:-https://${STORE_DOMAIN}/api/v1/me}
+XBOARD_USER_INFO_URL=${XBOARD_USER_INFO_URL:-https://${PANEL_DOMAIN}/api/v1/user/info}
 BRIDGE_LISTEN=${BRIDGE_LISTEN:-127.0.0.1:18081}
+BRIDGE_TRUSTED_CLIENTS=${BRIDGE_TRUSTED_CLIENTS:-127.0.0.1,::1}
+BRIDGE_CLIENT_URL=${BRIDGE_CLIENT_URL:-}
+if [[ -n "$XBOARD_DOCKER_CONTAINER" ]]; then
+  docker_network_mode=$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$XBOARD_DOCKER_CONTAINER")
+  if [[ "$docker_network_mode" == host ]]; then
+    BRIDGE_CLIENT_URL=${BRIDGE_CLIENT_URL:-http://${BRIDGE_LISTEN}/credential.php}
+  else
+    docker_network=$(docker inspect --format '{{range $name, $value := .NetworkSettings.Networks}}{{$name}}{{"\n"}}{{end}}' "$XBOARD_DOCKER_CONTAINER" | head -n 1)
+    docker_gateway=$(docker network inspect --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' "$docker_network")
+    docker_subnet=$(docker network inspect --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}' "$docker_network")
+    [[ -n "$docker_gateway" && -n "$docker_subnet" ]] || die 'Cannot detect the Xboard Docker gateway and subnet'
+    [[ "$BRIDGE_LISTEN" != 127.0.0.1:* ]] || BRIDGE_LISTEN="0.0.0.0:${BRIDGE_LISTEN##*:}"
+    BRIDGE_CLIENT_URL=${BRIDGE_CLIENT_URL:-http://${docker_gateway}:${BRIDGE_LISTEN##*:}/credential.php}
+    BRIDGE_TRUSTED_CLIENTS="${BRIDGE_TRUSTED_CLIENTS},${docker_subnet}"
+  fi
+else
+  BRIDGE_CLIENT_URL=${BRIDGE_CLIENT_URL:-http://${BRIDGE_LISTEN}/credential.php}
+fi
+BRIDGE_PROXY_URL="http://127.0.0.1:${BRIDGE_LISTEN##*:}"
 PANEL_ALLOWED_ORIGINS=${PANEL_ALLOWED_ORIGINS:-https://${PANEL_DOMAIN}}
 
 [[ -f "$XBOARD_DIR/artisan" ]] || die "Xboard artisan not found: $XBOARD_DIR/artisan"
@@ -220,11 +209,6 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP_DIR="/var/backups/$PROJECT_NAME/$STAMP"
 install -d -m 0700 "$BACKUP_DIR"
 
-backup_file() {
-  local source=$1 name=$2
-  [[ -e "$source" ]] && cp -a "$source" "$BACKUP_DIR/$name"
-}
-
 log "备份现有配置到 $BACKUP_DIR"
 backup_file "$XBOARD_DIR/.env" xboard.env
 backup_file "$XBOARD_ROUTE_FILE" xboard-route.php
@@ -236,20 +220,18 @@ backup_file /etc/systemd/system/dujiao-xboard-bridge.service systemd-service
 backup_file /etc/dujiao-xboard-sso-bridge.env bridge.env
 cp -a "$DUJIAO_DB" "$BACKUP_DIR/dujiao.db"
 printf '%s\n' "$XBOARD_DIR" "$DUJIAO_DB" "$DUJIAO_CONFIG" "$XBOARD_ROUTE_FILE" "$STORE_NGINX_CONF" > "$BACKUP_DIR/paths.txt"
+{
+  printf 'XBOARD_DIR=%q\n' "$XBOARD_DIR"
+  printf 'XBOARD_ROUTE_FILE=%q\n' "$XBOARD_ROUTE_FILE"
+  printf 'XBOARD_USER_ROUTE_FILE=%q\n' "$XBOARD_USER_ROUTE_FILE"
+  printf 'XBOARD_DOCKER_CONTAINER=%q\n' "$XBOARD_DOCKER_CONTAINER"
+  printf 'XBOARD_CONTAINER_DIR=%q\n' "$XBOARD_CONTAINER_DIR"
+  printf 'DUJIAO_DB=%q\n' "$DUJIAO_DB"
+  printf 'DUJIAO_LAYOUT_FILE=%q\n' "$DUJIAO_LAYOUT_FILE"
+  printf 'XBOARD_LAYOUT_FILE=%q\n' "$XBOARD_LAYOUT_FILE"
+  printf 'STORE_NGINX_CONF=%q\n' "$STORE_NGINX_CONF"
+} > "$BACKUP_DIR/paths.env"
 ok '备份完成'
-
-set_env_value() {
-  local file=$1 key=$2 value=$3 temporary
-  temporary=$(mktemp)
-  awk -v key="$key" -v value="$value" '
-    BEGIN { found=0 }
-    $0 ~ "^" key "=" { print key "=" value; found=1; next }
-    { print }
-    END { if (!found) print key "=" value }
-  ' "$file" > "$temporary"
-  cat "$temporary" > "$file"
-  rm -f "$temporary"
-}
 
 log '安装 Xboard 控制器和路由'
 install -m 0644 "$SCRIPT_DIR/xboard/GoSsoController.php" "$XBOARD_DIR/app/Http/Controllers/V1/Passport/GoSsoController.php"
@@ -288,7 +270,7 @@ if ! grep -Fq "'/auth/goSso'" "$XBOARD_ROUTE_FILE"; then
 fi
 
 set_env_value "$XBOARD_DIR/.env" DUJIAO_IDENTITY_URL "$DUJIAO_IDENTITY_URL"
-set_env_value "$XBOARD_DIR/.env" DUJIAO_CREDENTIAL_URL "http://${BRIDGE_LISTEN}/credential.php"
+set_env_value "$XBOARD_DIR/.env" DUJIAO_CREDENTIAL_URL "$BRIDGE_CLIENT_URL"
 set_env_value "$XBOARD_DIR/.env" DUJIAO_SSO_FAILURE_URL "https://${STORE_DOMAIN}/auth/login?sso=failed"
 set_env_value "$XBOARD_DIR/.env" DUJIAO_PUBLIC_URL "https://${STORE_DOMAIN}"
 
@@ -300,14 +282,6 @@ if ! grep -Fq "[StoreOrderTicketController::class, 'save']" "$XBOARD_USER_ROUTE_
   grep -Fq "[TicketController::class, 'save']" "$XBOARD_USER_ROUTE_FILE" || die 'Cannot locate the Xboard ticket save route'
   sed -i "s/\[TicketController::class, 'save'\]/[StoreOrderTicketController::class, 'save']/" "$XBOARD_USER_ROUTE_FILE"
 fi
-
-run_artisan() {
-  if [[ -n "$XBOARD_DOCKER_CONTAINER" ]]; then
-    docker exec -w "$XBOARD_CONTAINER_DIR" "$XBOARD_DOCKER_CONTAINER" php artisan "$@"
-  else
-    php "$XBOARD_DIR/artisan" "$@"
-  fi
-}
 
 run_artisan optimize:clear >/dev/null
 run_artisan migrate --force >/dev/null
@@ -333,6 +307,7 @@ DUJIAO_IDENTITY_URL=${DUJIAO_IDENTITY_URL}
 DUJIAO_CREDENTIAL_URL=http://${BRIDGE_LISTEN}/credential.php
 XBOARD_USER_INFO_URL=${XBOARD_USER_INFO_URL}
 XBOARD_PUBLIC_ORIGINS=${PANEL_ALLOWED_ORIGINS}
+BRIDGE_TRUSTED_CLIENTS=${BRIDGE_TRUSTED_CLIENTS}
 XBOARD_ENV_PATH=${XBOARD_DIR}/.env
 DUJIAO_CONFIG_PATH=${DUJIAO_CONFIG}
 DUJIAO_DATABASE_PATH=${DUJIAO_DB}
@@ -387,7 +362,7 @@ install -d -m 0755 /etc/nginx/snippets
 cat > /etc/nginx/snippets/dujiao-xboard-sso-bridge.conf <<EOF
 location = /sso/xboard {
     client_max_body_size 16k;
-    proxy_pass http://${BRIDGE_LISTEN}/index.php;
+    proxy_pass ${BRIDGE_PROXY_URL}/index.php;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -396,7 +371,7 @@ location = /sso/xboard {
 }
 location = /sso/orders {
     client_max_body_size 16k;
-    proxy_pass http://${BRIDGE_LISTEN}/orders.php;
+    proxy_pass ${BRIDGE_PROXY_URL}/orders.php;
     proxy_set_header Host \$host;
     proxy_set_header X-Real-IP \$remote_addr;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -428,54 +403,6 @@ fi
 systemctl reload nginx
 ok 'Nginx 路由已生效'
 
-render_production_template() {
-  local source=$1 target=$2 content
-  content=$(<"$source")
-  content=${content//__PANEL_SSO_URL__/https:\/\/${PANEL_DOMAIN}\/api\/v1\/passport\/auth\/goSso}
-  content=${content//__STORE_URL__/https:\/\/${STORE_DOMAIN}\/}
-  content=${content//__STORE_SSO_URL__/https:\/\/${STORE_DOMAIN}\/sso\/xboard}
-  content=${content//__STORE_ORDER_API__/https:\/\/${STORE_DOMAIN}\/sso\/orders}
-  content=${content//__TELEGRAM_URL__/$TELEGRAM_URL}
-  content=${content//__TELEGRAM_HANDLE__/$TELEGRAM_HANDLE}
-  content=${content//__PANEL_LOGO_URL__/\/assets\/dx-bridge\/panel-logo.png}
-  content=${content//__STORE_LOGO_URL__/\/assets\/dx-bridge\/store-logo.png}
-  printf '%s' "$content" > "$target"
-}
-
-install_frontend() {
-  local site_name=$1 public_dir=$2 layout_file=$3 entry_file=$4 css_file=$5 logo_file=$6
-  [[ -n "$public_dir" ]] || { warn "$site_name 未配置静态目录，跳过前端按钮"; return; }
-  [[ -d "$public_dir" ]] || die "$site_name static directory not found: $public_dir"
-  local asset_dir="$public_dir/assets/dx-bridge"
-  install -d -m 0755 "$asset_dir"
-  install -m 0644 "$SCRIPT_DIR/templates/production/$css_file" "$asset_dir/$css_file"
-  install -m 0644 "$SCRIPT_DIR/templates/production/$logo_file" "$asset_dir/$logo_file"
-  render_production_template "$SCRIPT_DIR/templates/production/$entry_file.tpl" "$asset_dir/$entry_file"
-
-  [[ -n "$layout_file" ]] || { warn "$site_name 资源已安装，但没有布局文件；请手动引入 $asset_dir"; return; }
-  [[ -f "$layout_file" ]] || die "$site_name layout file not found: $layout_file"
-  backup_file "$layout_file" "${site_name}-layout"
-  local marker="dx-bridge-${site_name}"
-  if ! grep -Fq "$marker" "$layout_file"; then
-    local temporary block inserted=0
-    temporary=$(mktemp)
-    block="<!-- $marker -->
-<link rel=\"stylesheet\" href=\"/assets/dx-bridge/$css_file?v=$STAMP\">
-<script defer src=\"/assets/dx-bridge/$entry_file?v=$STAMP\"></script>"
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      if [[ $inserted -eq 0 && "$line" == *'</body>'* ]]; then
-        printf '%s\n' "$block" >> "$temporary"
-        inserted=1
-      fi
-      printf '%s\n' "$line" >> "$temporary"
-    done < "$layout_file"
-    [[ $inserted -eq 1 ]] || { rm -f "$temporary"; die "$site_name layout has no </body>; frontend files were installed but HTML was not modified"; }
-    cat "$temporary" > "$layout_file"
-    rm -f "$temporary"
-  fi
-  ok "$site_name 前端入口已安装"
-}
-
 install_frontend dujiao "${DUJIAO_PUBLIC_DIR:-}" "${DUJIAO_LAYOUT_FILE:-}" go-xboard-bridge.js go-xboard-bridge.css panel-logo.png
 install_frontend xboard "${XBOARD_PUBLIC_DIR:-}" "${XBOARD_LAYOUT_FILE:-}" xboard-shop-ai-store.js xboard-shop-ai-store.css store-logo.png
 
@@ -506,6 +433,15 @@ ss -lnt 2>/dev/null | grep -Fq "$BRIDGE_LISTEN" || warn "无法从 ss 输出确�
 curl -fsSI --max-time 15 "https://${STORE_DOMAIN}/" >/dev/null || warn '商城首页 HTTP 检查失败'
 curl -fsSI --max-time 15 "https://${PANEL_DOMAIN}/" >/dev/null || warn '节点首页 HTTP 检查失败'
 
+install -d -m 0755 "/var/lib/$PROJECT_NAME"
+{
+  printf 'VERSION=%q\n' "$(<"$SCRIPT_DIR/VERSION")"
+  printf 'INSTALL_DIR=%q\n' "$SCRIPT_DIR"
+  printf 'LAST_BACKUP=%q\n' "$BACKUP_DIR"
+  printf 'INSTALLED_AT=%q\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "/var/lib/$PROJECT_NAME/state.env"
+chmod 0644 "/var/lib/$PROJECT_NAME/state.env"
+
 cat <<EOF
 
 安装完成。
@@ -513,6 +449,7 @@ cat <<EOF
 备份目录：$BACKUP_DIR
 服务状态：systemctl status dujiao-xboard-bridge.service
 桥接日志：journalctl -u dujiao-xboard-bridge.service -n 100 --no-pager
+统一命令：$SCRIPT_DIR/bin/dx-bridge check
 
 请使用普通临时账号完成：
 1. 商城 → 节点一键登录；
