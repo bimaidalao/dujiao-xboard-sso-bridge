@@ -29,4 +29,4 @@ Xboard 节点订单直接按当前登录用户查询。AI 商店订单由 Xboard
 
 ## 兼容性
 
-安装器会备份并修改 Xboard V1 用户路由，将 `/user/ticket/save` 指向 `StoreOrderTicketController`，同时运行数据库迁移，为 `v2_ticket` 增加 `go_order_id` 和 `go_order_no`。升级 Xboard 后应重新执行 `check-install.sh` 并验证路由和迁移状态。
+安装器会备份并修改 Xboard V1 用户路由，将 `/user/ticket/save` 指向 `StoreOrderTicketController`，同时运行数据库迁移，为 `v2_ticket` 增加 `go_order_id` 和 `go_order_no`。升级 Xboard 后应执行 `bin/dx-bridge check` 并验证路由和迁移状态。
