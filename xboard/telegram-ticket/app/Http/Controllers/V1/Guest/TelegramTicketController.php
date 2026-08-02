@@ -37,7 +37,7 @@ class TelegramTicketController extends Controller
                 'update_id' => $update['update_id'] ?? null,
                 'error' => $e->getMessage(),
             ]);
-            $telegram->sendText('鉂?鎿嶄綔澶辫触锛? . htmlspecialchars($e->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
+            $telegram->sendText('❌ 操作失败：' . htmlspecialchars($e->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'));
         }
 
         return response()->json(['ok' => true]);
@@ -47,7 +47,7 @@ class TelegramTicketController extends Controller
     {
         $text = trim((string) ($message['text'] ?? $message['caption'] ?? ''));
         if ($text === '/start' || $text === '/help') {
-            $telegram->sendText("<b>璺ㄥ閫熶簯宸ュ崟鍔╂墜</b>\n\n鍥炲鏈哄櫒浜哄彂鏉ョ殑宸ュ崟閫氱煡锛屽彲鐩存帴鍥炲缃戠珯宸ュ崟銆俓n涔熷彲浣跨敤锛歕n<code>/reply 宸ュ崟ID 鍥炲鍐呭</code>\n<code>/close 宸ュ崟ID</code>\n<code>/ticket 宸ュ崟ID</code>");
+            $telegram->sendText("<b>跨境速云工单助手</b>\n\n回复机器人发来的工单通知，可直接回复网站工单。\n也可使用：\n<code>/reply 工单ID 回复内容</code>\n<code>/close 工单ID</code>\n<code>/ticket 工单ID</code>");
             return;
         }
 
@@ -68,14 +68,14 @@ class TelegramTicketController extends Controller
         if ($replyText !== '' && preg_match('/#\s*(\d+)/u', $replyText, $match)) {
             $hasMedia = !empty($message['photo']) || !empty($message['video']) || !empty($message['animation']) || !empty($message['sticker']);
             if ($text === '' && !$hasMedia) {
-                $telegram->sendText('璇疯緭鍏ユ枃瀛楋紝鎴栧彂閫佸浘鐗囥€佽创绾搞€佽棰戙€?);
+                $telegram->sendText('请输入文字，或发送图片、贴纸、视频。');
                 return;
             }
             $this->replyToTicket((int) $match[1], $text, $telegram, $message);
             return;
         }
 
-        $telegram->sendText('璇风洿鎺モ€滃洖澶嶁€濇煇鏉″伐鍗曢€氱煡锛屾垨鍙戦€?<code>/help</code> 鏌ョ湅鍛戒护銆?);
+        $telegram->sendText('请直接“回复”某条工单通知，或发送 <code>/help</code> 查看命令。');
     }
 
     private function handleCallback(array $callback, TelegramTicketService $telegram): void
@@ -85,13 +85,13 @@ class TelegramTicketController extends Controller
         if (preg_match('/^ticket_close:(\d+)$/', $data, $match)) {
             $ticket = Ticket::find((int) $match[1]);
             if (!$ticket) {
-                $telegram->answerCallback($callbackId, '宸ュ崟涓嶅瓨鍦?);
+                $telegram->answerCallback($callbackId, '工单不存在');
                 return;
             }
             $ticket->status = Ticket::STATUS_CLOSED;
             $ticket->save();
-            $telegram->answerCallback($callbackId, '宸ュ崟宸插叧闂?);
-            $telegram->sendText('鉁?宸ュ崟 #' . $ticket->id . ' 宸插叧闂?);
+            $telegram->answerCallback($callbackId, '工单已关闭');
+            $telegram->sendText('✅ 工单 #' . $ticket->id . ' 已关闭');
         }
     }
 
@@ -99,18 +99,18 @@ class TelegramTicketController extends Controller
     {
         $ticket = Ticket::find($ticketId);
         if (!$ticket) {
-            throw new \RuntimeException('宸ュ崟涓嶅瓨鍦?);
+            throw new \RuntimeException('工单不存在');
         }
         if ((int) $ticket->status === Ticket::STATUS_CLOSED) {
-            throw new \RuntimeException('宸ュ崟宸插叧闂紝涓嶈兘鍥炲');
+            throw new \RuntimeException('工单已关闭，不能回复');
         }
         $adminId = $telegram->resolveAdminUserId();
         if (!$adminId) {
-            throw new \RuntimeException('鏈壘鍒?Xboard 绠＄悊鍛樿处鍙?);
+            throw new \RuntimeException('未找到 Xboard 管理员账号');
         }
         $media = $telegram->importTelegramMedia($telegramMessage, $ticket);
         if ($media) {
-            $label = $media->kind === 'video' ? '瀹㈡湇鍙戦€佷簡瑙嗛' : ($media->kind === 'sticker' ? '瀹㈡湇鍙戦€佷簡琛ㄦ儏鍖? : '瀹㈡湇鍙戦€佷簡鍥剧墖');
+            $label = $media->kind === 'video' ? '客服发送了视频' : ($media->kind === 'sticker' ? '客服发送了表情包' : '客服发送了图片');
             $message = trim($message) !== '' ? trim($message) : $label;
             $message .= "\n[[ticket-media:{$media->id}:{$media->kind}]]";
         }
@@ -119,36 +119,36 @@ class TelegramTicketController extends Controller
             $media->ticket_message_id = TicketMessage::where('ticket_id', $ticketId)->latest('id')->value('id');
             $media->save();
         }
-        $telegram->sendText('鉁?宸插洖澶嶅伐鍗?#' . $ticketId);
+        $telegram->sendText('✅ 已回复工单 #' . $ticketId);
     }
 
     private function closeTicket(int $ticketId, TelegramTicketService $telegram): void
     {
         $ticket = Ticket::find($ticketId);
         if (!$ticket) {
-            throw new \RuntimeException('宸ュ崟涓嶅瓨鍦?);
+            throw new \RuntimeException('工单不存在');
         }
         $ticket->status = Ticket::STATUS_CLOSED;
         $ticket->save();
-        $telegram->sendText('鉁?宸ュ崟 #' . $ticketId . ' 宸插叧闂?);
+        $telegram->sendText('✅ 工单 #' . $ticketId . ' 已关闭');
     }
 
     private function showTicket(int $ticketId, TelegramTicketService $telegram): void
     {
         $ticket = Ticket::with(['user', 'messages' => fn ($query) => $query->latest('id')->limit(5)])->find($ticketId);
         if (!$ticket) {
-            throw new \RuntimeException('宸ュ崟涓嶅瓨鍦?);
+            throw new \RuntimeException('工单不存在');
         }
         $lines = [
-            '<b>宸ュ崟 #' . $ticket->id . '</b>',
-            '<b>涓婚锛?/b>' . htmlspecialchars((string) $ticket->subject, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-            '<b>鐢ㄦ埛锛?/b>' . htmlspecialchars((string) ($ticket->user->email ?? $ticket->user_id), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
-            '<b>鐘舵€侊細</b>' . ((int) $ticket->status === Ticket::STATUS_CLOSED ? '宸插叧闂? : '澶勭悊涓?),
+            '<b>工单 #' . $ticket->id . '</b>',
+            '<b>主题：</b>' . htmlspecialchars((string) $ticket->subject, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+            '<b>用户：</b>' . htmlspecialchars((string) ($ticket->user->email ?? $ticket->user_id), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'),
+            '<b>状态：</b>' . ((int) $ticket->status === Ticket::STATUS_CLOSED ? '已关闭' : '处理中'),
             '',
         ];
         foreach ($ticket->messages->reverse() as $item) {
-            $role = (int) $item->user_id === (int) $ticket->user_id ? '鐢ㄦ埛' : '瀹㈡湇';
-            $lines[] = '<b>' . $role . '锛?/b>' . htmlspecialchars((string) $item->message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $role = (int) $item->user_id === (int) $ticket->user_id ? '用户' : '客服';
+            $lines[] = '<b>' . $role . '：</b>' . htmlspecialchars((string) $item->message, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         }
         $telegram->sendText(implode("\n", $lines));
     }
