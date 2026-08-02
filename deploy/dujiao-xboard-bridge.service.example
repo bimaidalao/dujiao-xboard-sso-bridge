@@ -3,6 +3,7 @@ Description=Dujiao and Xboard SSO Bridge
 After=network.target
 
 [Service]
+# Docker bridge 网络请让安装器生成实际监听地址和可信 CIDR，不要直接照抄本示例。
 Type=simple
 User=www-data
 Group=www-data

@@ -1,402 +1,195 @@
 # 傻瓜式完整部署教程
 
-本文面向第一次做二开的站长。每一步都说明“做什么、复制什么、看到什么算成功”。参考环境是：
+本文对应 `v1.0.0` 成品仓库。推荐让 Dujiao Next 与 Xboard 位于同一台 Linux 服务器；安装器支持 Xboard 原生 PHP、Docker host 网络和普通 Docker bridge 网络。
 
-- 同一台 Ubuntu 22.04/24.04 或 Debian 12 服务器；
-- Nginx 对外提供两个 HTTPS 网站；
-- Dujiao Next 使用 SQLite，内部 API 监听 `127.0.0.1:18080`；
-- Xboard 使用 Laravel + MySQL/MariaDB + Redis，内部 API 监听 `127.0.0.1:7001`；
-- 桥接服务使用 PHP，监听 `127.0.0.1:18081`。
+## 1. 部署前准备
 
-如果两个网站不在同一台服务器，请不要照抄本教程开放数据库或凭据端口，应改用受控私网和双向认证。
+必须具备：
 
-## 推荐：一个网址启动安装
+- Ubuntu 20.04/22.04/24.04 或 Debian 11/12；
+- root 或 sudo 权限；
+- 已经能正常访问的 Dujiao Next 与 Xboard；
+- 两个启用 HTTPS 的域名；
+- Dujiao SQLite 数据库和 `config.yml`；
+- Xboard 项目目录、`.env`、Web 容器（如使用 Docker）；
+- PHP 7.4+，并启用 `curl`、`PDO`、`pdo_mysql`、`pdo_sqlite`；
+- Xboard 使用其上游要求的 PHP，当前版本按 PHP 8.2+ 校验；
+- Nginx 与 systemd。
+
+先确认基础依赖：
+
+```bash
+php -v
+php -m | grep -E 'curl|PDO|pdo_mysql|pdo_sqlite'
+nginx -v
+systemctl --version | head -1
+docker ps 2>/dev/null || true
+```
+
+两个系统不在同一台服务器时，不要直接开放数据库、SQLite、密码哈希或 `18081` 端口。当前一键安装器只承诺同机或受控私网部署。
+
+## 2. 一条命令安装
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bimaidalao/dujiao-xboard-sso-bridge/main/bootstrap.sh | sudo bash
 ```
 
-安装器会自动完成本文第 0～8 步能安全自动化的内容，包括环境检查、路径探测、时间戳备份、Xboard 控制器和路由、密码共享桥接、systemd、Nginx 以及当前生产版桌面/手机组件。遇到无法可靠判断的版本或权限会停止，并显示备份位置和处理方法。
+安装器会依次询问并确认：
 
-希望先审查脚本再运行时：
+1. Xboard 根目录；
+2. Dujiao 数据库和配置文件；
+3. 商城域名与节点域名；
+4. Telegram 客服地址；
+5. Xboard 路由文件和 Docker Web 容器；
+6. Nginx 商城站点配置；
+7. 运行桥接服务的 Linux 用户；
+8. 两个网站的静态资源和 `index.html`。
 
-```bash
-curl -fLO https://raw.githubusercontent.com/bimaidalao/dujiao-xboard-sso-bridge/main/bootstrap.sh
-less bootstrap.sh
-sudo bash bootstrap.sh
-```
+确认摘要后才会写入文件。安装器会自动：
 
-以下手工步骤用于理解安装器、排查失败或适配非标准目录。
+- 建立时间戳备份；
+- 安装双向 SSO 控制器和路由；
+- 安装工单双系统最近订单摘要；
+- 运行数据库迁移；
+- 写入桥接环境与 systemd 服务；
+- 注入 Nginx 固定路由；
+- 安装桌面端与手机端组件；
+- 验证路由、服务、Nginx 和网站状态；
+- 写入 `/var/lib/dujiao-xboard-sso-bridge/state.env`。
 
-## 第 0 步：确认版本与依赖
+## 3. 先检查、不修改服务器
 
-登录服务器后执行：
-
-```bash
-uname -a
-nginx -v
-php -v
-php -m | grep -E 'curl|PDO|pdo_mysql|pdo_sqlite'
-systemctl --version | head -1
-```
-
-至少应看到 `curl`、`PDO`、`pdo_mysql` 和 `pdo_sqlite`。缺少模块时，Ubuntu/Debian 可按实际 PHP 版本安装，例如：
-
-```bash
-sudo apt update
-sudo apt install -y git curl php-cli php-curl php-mysql php-sqlite3
-```
-
-Xboard 本体需要的 PHP 版本以其上游要求为准；常见新版使用 PHP 8.2。桥接脚本兼容 PHP 7.4+。
-
-## 第 1 步：找到两个项目的真实路径
-
-先找 Xboard：
+希望先看自动识别结果：
 
 ```bash
-sudo find /www /opt /var/www -maxdepth 5 -type f -name artisan 2>/dev/null
+sudo /opt/dujiao-xboard-sso-bridge/bin/dx-bridge install --dry-run
 ```
 
-进入疑似目录，确认存在 `app/`、`routes/`、`vendor/` 和 `.env`：
-
-```bash
-cd /你的/Xboard/目录
-pwd
-ls -la
-php artisan --version
-```
-
-再找 Dujiao SQLite 数据库和配置：
-
-```bash
-sudo find /www /opt /var/www -type f \( -name 'dujiao.db' -o -name 'config.yml' \) 2>/dev/null
-```
-
-找不到时，查看正在运行的服务或容器：
-
-```bash
-systemctl --type=service --state=running | grep -Ei 'dujiao|xboard|php|docker'
-docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Ports}}' 2>/dev/null || true
-```
-
-## 第 2 步：填写自己的路径参数
-
-下面只是示例。请把域名和路径换成自己的，再逐行执行：
-
-```bash
-export BRIDGE_DIR=/opt/dujiao-xboard-sso-bridge
-export XBOARD_DIR=/opt/xboard
-export DUJIAO_DIR=/opt/dujiao-next
-export DUJIAO_DB=/opt/dujiao-next/db/dujiao.db
-export DUJIAO_CONFIG=/opt/dujiao-next/config.yml
-export STORE_DOMAIN=store.example.com
-export PANEL_DOMAIN=panel.example.com
-```
-
-立即检查，任何一项显示 `NOT FOUND` 都不要继续：
-
-```bash
-test -f "$XBOARD_DIR/artisan" && echo 'Xboard: OK' || echo 'Xboard: NOT FOUND'
-test -f "$XBOARD_DIR/.env" && echo 'Xboard .env: OK' || echo 'Xboard .env: NOT FOUND'
-test -f "$DUJIAO_DB" && echo 'Dujiao DB: OK' || echo 'Dujiao DB: NOT FOUND'
-test -f "$DUJIAO_CONFIG" && echo 'Dujiao config: OK' || echo 'Dujiao config: NOT FOUND'
-```
-
-## 第 3 步：下载代码并创建备份
-
-```bash
-cd /opt
-sudo git clone https://github.com/bimaidalao/dujiao-xboard-sso-bridge.git
-cd "$BRIDGE_DIR"
-```
-
-如果目录已经存在：
-
-```bash
-cd "$BRIDGE_DIR"
-sudo git pull --ff-only
-```
-
-创建时间戳备份目录：
-
-```bash
-export BACKUP_DIR=/root/dujiao-xboard-backup-$(date +%Y%m%d-%H%M%S)
-sudo install -d -m 0700 "$BACKUP_DIR"
-sudo cp -a "$XBOARD_DIR/.env" "$BACKUP_DIR/xboard.env"
-sudo cp -a "$DUJIAO_DB" "$BACKUP_DIR/dujiao.db"
-sudo cp -a "$DUJIAO_CONFIG" "$BACKUP_DIR/dujiao-config.yml"
-echo "备份位置：$BACKUP_DIR"
-```
-
-再备份 Xboard 用户表。命令会提示输入数据库密码，不要把密码写进脚本或聊天记录：
-
-```bash
-grep -E '^DB_(HOST|PORT|DATABASE|USERNAME)=' "$XBOARD_DIR/.env"
-mysqldump -h 数据库地址 -u 数据库用户 -p 数据库名称 v2_user > "$BACKUP_DIR/xboard-v2_user.sql"
-```
-
-## 第 4 步：安装 Xboard 端控制器
-
-先查找当前版本 Passport 控制器目录：
-
-```bash
-sudo find "$XBOARD_DIR/app" -type d -path '*Controllers*Passport*'
-```
-
-常见目标是：
+成功标准是出现安装摘要和：
 
 ```text
-app/Http/Controllers/V1/Passport/
+[ OK ] 预检通过。--dry-run 未修改任何文件或服务。
 ```
 
-确认后设置变量并复制：
+路径、域名、容器或 Nginx 文件有任何一项不正确，都不要继续正式安装。
+
+## 4. 无人值守配置
 
 ```bash
-export XBOARD_PASSPORT_DIR="$XBOARD_DIR/app/Http/Controllers/V1/Passport"
-sudo cp -a "$XBOARD_PASSPORT_DIR" "$BACKUP_DIR/xboard-passport-controllers"
-sudo install -m 0644 "$BRIDGE_DIR/xboard/GoSsoController.php" "$XBOARD_PASSPORT_DIR/GoSsoController.php"
+cd /opt/dujiao-xboard-sso-bridge
+cp install.env.example install.env
+nano install.env
+sudo bin/dx-bridge install --config install.env --yes --dry-run
+sudo bin/dx-bridge install --config install.env --yes
 ```
 
-当前生产基线的 Passport 路由文件是：
+重点参数：
 
-```bash
-export XBOARD_ROUTE_FILE="$XBOARD_DIR/app/Http/Routes/V1/PassportRoute.php"
-test -f "$XBOARD_ROUTE_FILE" && echo OK
-```
-
-如果该文件不存在，执行下面命令查找同类路由类；不要把片段盲目追加到 `routes/web.php`：
-
-```bash
-find "$XBOARD_DIR/app/Http/Routes" -type f -iname '*Passport*'
-```
-
-在现有 `PassportRoute` 类的 `passport` prefix 组内加入：
-
-```php
-use App\Http\Controllers\V1\Passport\GoSsoController;
-
-$router->post('/auth/goSso', [GoSsoController::class, 'login']);
-```
-
-仓库中的可复制片段位于 `xboard/routes.php.snippet`。
-
-向 Xboard `.env` 末尾加入三项：
-
-```dotenv
-DUJIAO_IDENTITY_URL=http://127.0.0.1:18080/api/v1/me
-DUJIAO_CREDENTIAL_URL=http://127.0.0.1:18081/credential.php
-DUJIAO_SSO_FAILURE_URL=https://store.example.com/auth/login?sso=failed
-```
-
-把 `store.example.com` 改成自己的商城域名。随后清缓存并检查路由：
-
-```bash
-cd "$XBOARD_DIR"
-php artisan optimize:clear
-php artisan route:list | grep -i goSso
-```
-
-成功标准：输出中存在 `POST` 和 `auth/goSso`。如果 Xboard 在 Docker 中，使用 Web 容器执行：
-
-```bash
-docker ps --format 'table {{.Names}}\t{{.Image}}'
-docker exec -w /www XBOARD_WEB容器名 php artisan optimize:clear
-docker exec -w /www XBOARD_WEB容器名 php artisan route:list | grep -i goSso
-docker restart XBOARD_WEB容器名
-```
-
-一键安装器会根据 `XBOARD_DIR` 的 bind mount 自动识别 Web 容器和容器内目录。
-
-## 第 5 步：配置 Dujiao 桥接服务
-
-先生成环境文件：
-
-```bash
-sudo tee /etc/dujiao-xboard-sso-bridge.env >/dev/null <<EOF
-DUJIAO_PUBLIC_URL=https://${STORE_DOMAIN}/
-XBOARD_PUBLIC_URL=https://${PANEL_DOMAIN}/
-DUJIAO_IDENTITY_URL=http://127.0.0.1:18080/api/v1/me
-DUJIAO_CREDENTIAL_URL=http://127.0.0.1:18081/credential.php
-XBOARD_USER_INFO_URL=http://127.0.0.1:7001/api/v1/user/info
-XBOARD_ENV_PATH=${XBOARD_DIR}/.env
-DUJIAO_CONFIG_PATH=${DUJIAO_CONFIG}
-DUJIAO_DATABASE_PATH=${DUJIAO_DB}
-EOF
-sudo chmod 0640 /etc/dujiao-xboard-sso-bridge.env
-sudo chown root:www-data /etc/dujiao-xboard-sso-bridge.env
-```
-
-检查文件中只有正确的域名、路径和本机地址：
-
-```bash
-sudo sed -n '1,20p' /etc/dujiao-xboard-sso-bridge.env
-```
-
-确保 Web 用户可以读取必要文件，并且 SQLite 所在目录允许 Dujiao 正常写入。不要直接使用 `chmod -R 777`。
-
-安装 systemd 服务：
-
-```bash
-sudo cp "$BRIDGE_DIR/deploy/dujiao-xboard-bridge.service.example" /etc/systemd/system/dujiao-xboard-bridge.service
-sudo nano /etc/systemd/system/dujiao-xboard-bridge.service
-```
-
-需要核对并修改这几行：
-
-```ini
-WorkingDirectory=/opt/dujiao-xboard-sso-bridge/dujiao/public
-ExecStart=/usr/bin/php -S 127.0.0.1:18081 -t /opt/dujiao-xboard-sso-bridge/dujiao/public
-ReadOnlyPaths=/opt/xboard
-ReadWritePaths=/opt/dujiao-next/db
-```
-
-把 `/opt/xboard` 和 `/opt/dujiao-next/db` 改成第 2 步填写的真实路径。如果系统的 PHP 不在 `/usr/bin/php`，先执行 `command -v php` 并替换 `ExecStart`。
-
-启动：
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now dujiao-xboard-bridge.service
-sudo systemctl status dujiao-xboard-bridge.service --no-pager
-ss -lntp | grep 18081
-```
-
-成功标准：服务显示 `active (running)`，并且 `18081` 只绑定 `127.0.0.1`，不能绑定 `0.0.0.0`。
-
-## 第 6 步：添加 Nginx 路由
-
-找到商城 Nginx 配置：
-
-```bash
-sudo nginx -T 2>/dev/null | grep -n "server_name ${STORE_DOMAIN}"
-```
-
-在商城域名的 `server { ... }` 内加入：
-
-```nginx
-location = /sso/xboard {
-    client_max_body_size 16k;
-    proxy_pass http://127.0.0.1:18081/index.php;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto $scheme;
-    add_header Cache-Control "no-store" always;
-}
-```
-
-不要为 `/credential.php` 添加公网代理，它只能由服务器本机访问。
-
-检查并重载：
-
-```bash
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-如果 `nginx -t` 报错，立即撤销刚才加入的配置；不要强制重启 Nginx。
-
-## 第 7 步：安装前端跨站入口
-
-当前生产服务器使用的原版组件已参数化保存在：
-
-```text
-templates/production/go-xboard-bridge.js.tpl
-templates/production/go-xboard-bridge.css
-templates/production/xboard-shop-ai-store.js.tpl
-templates/production/xboard-shop-ai-store.css
-templates/production/panel-logo.png
-templates/production/store-logo.png
-```
-
-推荐让 `install.sh` 自动替换域名、Telegram、SSO 地址和 Logo 路径并注入页面。手工部署时，不要直接公开 `.tpl`；先复制并替换所有 `__...__` 占位符：
-
-```bash
-grep -Rno '__[A-Z_]*__' templates/production
-```
-
-商城加载当前生产版：
-
-```html
-<link rel="stylesheet" href="/assets/dx-bridge/go-xboard-bridge.css?v=版本号">
-<script defer src="/assets/dx-bridge/go-xboard-bridge.js?v=版本号"></script>
-```
-
-Xboard 加载当前生产版：
-
-```html
-<link rel="stylesheet" href="/assets/dx-bridge/xboard-shop-ai-store.css?v=版本号">
-<script defer src="/assets/dx-bridge/xboard-shop-ai-store.js?v=版本号"></script>
-```
-
-主题没有“自定义 HTML”功能时，需要在源码布局文件或构建入口引入。不同主题的 DOM 结构不同，先在测试环境确认位置；不要直接覆盖主题整包。
-
-每次修改脚本后更新查询版本号，避免浏览器继续使用旧缓存。
-
-## 第 8 步：基础健康检查
-
-```bash
-systemctl is-active dujiao-xboard-bridge.service
-curl -I "https://${STORE_DOMAIN}/"
-curl -I "https://${PANEL_DOMAIN}/"
-curl -i -X POST "https://${STORE_DOMAIN}/sso/xboard"
-```
-
-预期结果：
-
-- 服务返回 `active`；
-- 两个首页返回 `200` 或正常的 `301/302`；
-- 未携带登录数据访问 SSO 路由应跳到登录页，而不是显示 PHP 源码；
-- 公网访问 `https://商城域名/credential.php` 应为 `404` 或拒绝访问。
-
-查看错误日志：
-
-```bash
-journalctl -u dujiao-xboard-bridge.service -n 100 --no-pager
-tail -n 100 "$XBOARD_DIR/storage/logs/laravel.log"
-```
-
-## 第 9 步：用临时账号验收
-
-不要先拿管理员账号测试。新建一个普通、已验证邮箱账号，按顺序操作：
-
-1. 登录商城，点击节点入口，应自动进入节点仪表盘。
-2. 退出节点网站，用商城邮箱和密码直接登录节点网站。
-3. 修改节点密码，然后点击“进入 AI 工具/账号商店”。
-4. 退出商城，用刚修改的节点密码直接登录商城。
-5. 检查两个网站显示相同邮箱。
-6. 禁用测试账号，确认不能继续通过 SSO。
-7. 在手机浏览器检查卡片不挡底部菜单、不与回到顶部按钮重叠。
-8. 日间和夜间各检查一次入口颜色与可读性。
-
-旧账号两边密码不一致时，**从哪一边发起跨站登录，就保留哪一边的密码**。不要对全部旧用户做没有通知的批量覆盖。
-
-## 第 10 步：回滚
-
-先停止新增桥接流量：
-
-```bash
-sudo systemctl disable --now dujiao-xboard-bridge.service
-```
-
-然后：
-
-1. 从 Nginx 商城配置中删除 `/sso/xboard` location，执行 `sudo nginx -t && sudo systemctl reload nginx`。
-2. 恢复 `$BACKUP_DIR/xboard-passport-controllers` 中的控制器，并删除新增路由。
-3. 恢复 `$BACKUP_DIR/xboard.env`，再执行 `php artisan optimize:clear`。
-4. 必要时恢复 `$BACKUP_DIR/dujiao.db` 和 `xboard-v2_user.sql`；恢复数据库前必须再次备份当前数据。
-5. 移除两个主题加载的桥接 JS/CSS。
-6. 确认两个网站原有登录、下单、支付和节点订阅功能正常。
-
-## 常见失败位置
-
-| 现象 | 先检查 |
+| 参数 | 用途 |
 | --- | --- |
-| 点击后回到登录页 | 浏览器 Token 名、目标 URL、来源账号是否已验证 |
-| Xboard 返回 404 | Laravel 路由片段是否在正确路由组、是否清过缓存 |
-| 桥接服务启动失败 | PHP 路径、WorkingDirectory、环境文件权限 |
-| 500 或数据库错误 | `pdo_mysql`、`pdo_sqlite`、Xboard `.env` 路径与权限 |
-| 一键登录成功但密码不同 | 两边是否同邮箱、哈希是否为 bcrypt、是否从想保留密码的一侧发起 |
-| 手机端无法滑动 | 透明容器是否接收 pointer event、旧主题 CSS 是否缓存 |
+| `XBOARD_DIR` | Xboard 宿主机项目目录 |
+| `DUJIAO_DB` | Dujiao SQLite 文件 |
+| `DUJIAO_CONFIG` | Dujiao `config.yml` |
+| `STORE_DOMAIN` | AI 工具商城域名，不含协议 |
+| `PANEL_DOMAIN` | 节点网站域名，不含协议 |
+| `XBOARD_DOCKER_CONTAINER` | Xboard Web 容器名；原生部署留空 |
+| `XBOARD_CONTAINER_DIR` | Xboard 在容器内的工作目录 |
+| `STORE_NGINX_CONF` | 商城 HTTPS server block 配置 |
+| `SERVICE_USER/GROUP` | 可访问 Dujiao DB 的最小权限用户 |
+| `BRIDGE_CLIENT_URL` | 通常留空，由安装器根据 Docker 网络生成 |
+| `BRIDGE_TRUSTED_CLIENTS` | 允许读取密码哈希的本机或私网地址/CIDR |
 
-更多错误日志关键词和处理方式见 [故障排查](TROUBLESHOOTING.md)。
+不要把填写完成的 `install.env` 提交到 GitHub。
+
+## 5. Docker 网络说明
+
+### host 网络
+
+容器和宿主机共享网络，桥接默认监听 `127.0.0.1:18081`。密码哈希接口只允许本机访问。
+
+### bridge 网络
+
+安装器会读取容器所在 Docker network 的网关和子网：
+
+- 桥接监听调整为 `0.0.0.0:18081`；
+- Xboard 通过 Docker 网关访问桥接；
+- `credential.php` 仅信任 localhost 和检测到的 Docker CIDR；
+- Nginx 仍通过 `127.0.0.1:18081` 反向代理。
+
+即使应用层有限制，也应在云防火墙或主机防火墙禁止公网访问 `18081/tcp`。
+
+## 6. 安装后检查
+
+```bash
+sudo /opt/dujiao-xboard-sso-bridge/bin/dx-bridge check
+sudo systemctl status dujiao-xboard-bridge.service --no-pager
+sudo journalctl -u dujiao-xboard-bridge.service -n 100 --no-pager
+sudo nginx -t
+```
+
+随后用专门的普通测试账号完成：
+
+1. 商城登录后跳转节点网站；
+2. 节点网站登录后跳转商城；
+3. 退出两个网站，使用相同邮箱和密码分别独立登录；
+4. 创建工单，确认自动附带节点与商城各自最近一笔订单；
+5. 确认订单摘要没有卡密、密码和自动发货正文；
+6. 手机端打开、滑动、输入和提交工单；
+7. 检查悬浮卡片不遮挡底部导航与输入框。
+
+不要使用管理员账号做首次验收。
+
+## 7. 更新
+
+```bash
+cd /opt/dujiao-xboard-sso-bridge
+sudo bin/dx-bridge validate
+sudo bin/dx-bridge update --config install.env --yes
+sudo bin/dx-bridge check
+```
+
+更新前工作目录必须没有未提交修改。安装器会重新建立备份；检测到不兼容的路由、权限或 Nginx 结构时会停止。
+
+## 8. 回滚
+
+恢复最近一次程序和配置备份：
+
+```bash
+sudo /opt/dujiao-xboard-sso-bridge/bin/dx-bridge rollback
+```
+
+指定某个备份：
+
+```bash
+sudo bin/dx-bridge rollback --backup /var/backups/dujiao-xboard-sso-bridge/时间戳
+```
+
+默认不会恢复 Dujiao 数据库，避免覆盖安装后新增的订单。只有明确确认需要数据库回滚时才使用：
+
+```bash
+sudo bin/dx-bridge rollback --with-db
+```
+
+## 9. 文件位置
+
+| 内容 | 默认位置 |
+| --- | --- |
+| 项目 | `/opt/dujiao-xboard-sso-bridge` |
+| 桥接环境 | `/etc/dujiao-xboard-sso-bridge.env` |
+| systemd 服务 | `/etc/systemd/system/dujiao-xboard-bridge.service` |
+| Nginx 片段 | `/etc/nginx/snippets/dujiao-xboard-sso-bridge.conf` |
+| 安装状态 | `/var/lib/dujiao-xboard-sso-bridge/state.env` |
+| 时间戳备份 | `/var/backups/dujiao-xboard-sso-bridge/` |
+
+## 10. 常见失败处理
+
+- `401/403`：检查登录 Token、邮箱验证状态和账号禁用状态；
+- Docker 中访问 `127.0.0.1` 失败：不要手改公网端口，重新运行 dry-run 检查网络模式和 `BRIDGE_CLIENT_URL`；
+- 凭据接口 `403`：检查 `BRIDGE_TRUSTED_CLIENTS` 是否包含真实 Docker 子网；
+- Xboard 路由不存在：核对 `PassportRoute.php` 和 `UserRoute.php`；
+- PHP 语法错误：桥接用 PHP 7.4+ 校验，Xboard 文件必须在 Xboard PHP 8.2+ 环境校验；
+- SQLite 写入失败：为服务用户配置最小化 owner/group/ACL，不要使用 `chmod 777`；
+- Nginx 校验失败：安装器会恢复原配置，查看输出的备份目录；
+- 手机端仍显示旧组件：清理页面/CDN缓存后确认资源查询版本已变化。
+
+进一步诊断见 [故障排查](TROUBLESHOOTING.md) 和 [安全说明](SECURITY.md)。

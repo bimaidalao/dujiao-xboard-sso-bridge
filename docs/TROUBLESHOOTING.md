@@ -23,6 +23,28 @@
 
 不要只等待容器状态为 Up。应循环请求健康接口，连续三次返回 200 后再执行 SSO 验证。
 
+## Docker 中访问桥接失败
+
+- 先执行 `docker inspect --format '{{.HostConfig.NetworkMode}}' 容器名`；
+- host 网络应使用 `127.0.0.1:18081`；
+- bridge 网络应使用安装器检测到的 Docker 网关；
+- `credential.php` 返回 403 时核对 `/etc/dujiao-xboard-sso-bridge.env` 中的 `BRIDGE_TRUSTED_CLIENTS`；
+- 不要把可信网段改成 `0.0.0.0/0`，也不要向公网开放 `18081`。
+
+重新检查：
+
+```bash
+sudo /opt/dujiao-xboard-sso-bridge/bin/dx-bridge check
+```
+
+## 工单没有订单摘要
+
+- 确认 `/user/ticket/save` 已指向 `StoreOrderTicketController`；
+- 确认迁移已经增加 `go_order_id` 和 `go_order_no`；
+- 节点订单按当前 Xboard `user_id` 查询，商城订单按映射邮箱查询；
+- 某一边确实没有订单时只会附带另一边；
+- 检查桥接日志中的 `order verification failed`，但不要输出 Authorization。
+
 ## 手机端无法滑动或按钮被遮挡
 
 - 检查悬浮容器是否覆盖全屏；
@@ -33,4 +55,3 @@
 ## 浏览器仍显示旧样式
 
 更新 CSS/JS 查询版本号，清理 CDN 缓存，并在手机浏览器强制刷新。
-

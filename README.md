@@ -133,7 +133,7 @@ curl -fsSL https://raw.githubusercontent.com/bimaidalao/dujiao-xboard-sso-bridge
 只想检查自动识别结果、不修改服务器：
 
 ```bash
-sudo bash /opt/dujiao-xboard-sso-bridge/install.sh --dry-run
+sudo /opt/dujiao-xboard-sso-bridge/bin/dx-bridge install --dry-run
 ```
 
 安装器支持配置文件无人值守模式：
@@ -141,7 +141,7 @@ sudo bash /opt/dujiao-xboard-sso-bridge/install.sh --dry-run
 ```bash
 cp install.env.example install.env
 nano install.env
-sudo bash install.sh --config install.env --yes
+sudo bin/dx-bridge install --config install.env --yes
 ```
 
 > 一键不等于盲改。脚本会在 `/var/backups/dujiao-xboard-sso-bridge/` 创建时间戳备份；无法确认 Xboard 路由、Nginx server block 或文件权限时会停止，不会使用 `chmod 777`，也不会把凭据端口开放到公网。
@@ -168,7 +168,7 @@ docs/                   功能、架构、部署、安全和故障排查文档
 - 公开网络只接收当前用户的短时会话令牌，不接收密码明文。
 - 密码哈希接口仅监听本机，并再次验证来源用户会话。
 - 只同步邮箱、状态和兼容 bcrypt 哈希。
-- 不同步支付信息、卡密、自动发货内容、管理员权限或订单隐私数据。
+- 工单只同步当前用户两边最近订单的必要摘要；不同步卡密、自动发货内容、密码、管理员权限或完整支付信息。
 - 不要把真实 `.env`、数据库、备份、日志或密钥提交到 GitHub。
 - Dujiao Next 或 Xboard 升级后，应先在测试环境重新验证字段和认证流程。
 
