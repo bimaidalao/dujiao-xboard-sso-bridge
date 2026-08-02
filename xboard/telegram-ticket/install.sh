@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR=${XBOARD_DIR:-${1:-}}
-[[ -n $ROOT_DIR && -f $ROOT_DIR/artisan ]] || { echo '鐢ㄦ硶: XBOARD_DIR=/path/to/xboard bash install.sh'; exit 1; }
+[[ -n $ROOT_DIR && -f $ROOT_DIR/artisan ]] || { echo '用法: XBOARD_DIR=/path/to/xboard bash install.sh'; exit 1; }
 SOURCE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 PHP_CMD=${XBOARD_PHP_CMD:-php}
 STAMP=$(date +%Y%m%d-%H%M%S)
@@ -43,7 +43,7 @@ files=(
 for relative in "${files[@]}"; do
   source_file="$SOURCE_DIR/$relative"
   target_file="$ROOT_DIR/$relative"
-  [[ -f $source_file ]] || { echo "缂哄皯鍙戝竷鏂囦欢: $source_file"; exit 1; }
+  [[ -f $source_file ]] || { echo "缺少发布文件: $source_file"; exit 1; }
   if [[ -f $target_file ]]; then
     mkdir -p "$BACKUP_DIR/$(dirname "$relative")"
     cp -a "$target_file" "$BACKUP_DIR/$relative"
@@ -88,5 +88,5 @@ if [[ -n $WEBHOOK_URL ]]; then
     -d "{\"url\":\"${WEBHOOK_URL}\",\"secret_token\":\"${TELEGRAM_TICKET_WEBHOOK_SECRET}\",\"allowed_updates\":[\"message\",\"callback_query\"]}" >/dev/null
 fi
 
-echo "瀹夎瀹屾垚銆傚浠界洰褰? $BACKUP_DIR"
-echo '璇峰垱寤轰竴寮犳祴璇曞伐鍗曪紝骞朵粠 Telegram 寮曠敤鍥炲鏂囧瓧銆佸浘鐗囨垨瑙嗛銆?
+echo "安装完成。备份目录: $BACKUP_DIR"
+echo '请创建一张测试工单，并从 Telegram 引用回复文字、图片或视频。'
